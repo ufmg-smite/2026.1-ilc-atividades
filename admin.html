@@ -51,9 +51,13 @@
   <!-- ===== auth + quiz list ===== -->
   <div class="card">
     <h1>Painel do professor</h1>
-    <p class="sub">Crie e edite quizzes, abra/feche a sessão. O código de admin não é salvo nesta página.</p>
+    <p class="sub">Crie e edite quizzes, abra/feche a sessão.</p>
     <label>Código de admin</label>
     <input id="admin" type="password" placeholder="ADMIN_CODE" autocomplete="off" />
+    <label style="font-size:13px;color:#5f6368;margin-top:6px;display:block;">
+      <input type="checkbox" id="rememberAdmin" style="width:auto;margin-right:6px;vertical-align:middle;">
+      Lembrar o código neste dispositivo (use apenas no seu próprio computador)
+    </label>
     <div class="row">
       <button class="status" id="listBtn">Carregar quizzes</button>
       <button class="add" id="newBtn">+ Novo quiz</button>
@@ -128,6 +132,19 @@
     }
     const invalid = (status, d) => status === 403 ? "Código de admin inválido." : (d.error || "Falha.");
     const fmt = (iso) => iso ? new Date(iso).toLocaleString() : "—";
+
+    // ---------- remember admin code (opt-in, this device only) ----------
+    const ADMIN_LS = "ilc-admin-code";
+    (function () {
+      const saved = localStorage.getItem(ADMIN_LS);
+      if (saved) { $("admin").value = saved; $("rememberAdmin").checked = true; }
+    })();
+    function persistAdmin() {
+      if ($("rememberAdmin").checked) localStorage.setItem(ADMIN_LS, $("admin").value.trim());
+      else localStorage.removeItem(ADMIN_LS);
+    }
+    $("rememberAdmin").addEventListener("change", persistAdmin);
+    $("admin").addEventListener("input", persistAdmin);
 
     // ---------- quiz list ----------
     $("listBtn").addEventListener("click", loadList);
