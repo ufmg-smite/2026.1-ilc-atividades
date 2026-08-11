@@ -1,0 +1,15 @@
+# Never commit exported answers or any local secrets
+*.csv
+*_for_analysis.txt
+.env
+.env.*
+SETUP.md
+
+# Quiz QUESTIONS live in the database (authored via admin.html), not the repo —
+# keep the seed out of the public repo so students can't read questions early.
+supabase/quizzes.sql
+
+# Local tooling / cache — not part of the site
+.claude/
+__pycache__/
+*.pyc

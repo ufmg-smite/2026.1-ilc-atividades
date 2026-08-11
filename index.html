@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ILC — Atividades práticas</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <style>
+    :root { --line:#dadce0; --accent:#673ab7; --bg:#f0ebf8; --ok:#188038; --err:#d93025; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Roboto, Arial, sans-serif;
+           background: var(--bg); margin: 0; padding: 20px 12px 60px; color: #202124; }
+    .card { max-width: 680px; margin: 0 auto 14px; background: #fff;
+            border: 1px solid var(--line); border-radius: 8px; padding: 20px 22px; }
+    .top { border-top: 10px solid var(--accent); }
+    h1 { font-size: 26px; margin: 2px 0 8px; font-weight: 500; }
+    .desc { color:#444; font-size: 14px; line-height: 1.5; }
+    .qtitle { font-size: 17px; font-weight: 500; margin: 0 0 6px; }
+    .instr { font-size: 14px; color:#333; margin: 0 0 10px; line-height:1.5; }
+    .prompt { font-size: 15px; color:#202124; line-height:1.55; margin: 0 0 4px; }
+    .prompt p { margin: 0 0 8px; }
+    .prompt ul, .prompt ol { margin: 6px 0 8px; padding-left: 22px; }
+    .prompt li { margin: 3px 0; }
+    .prompt strong { font-weight: 600; }
+    .prompt code { background:#f5f2fb; padding:1px 5px; border-radius:4px; }
+    .items { margin: 0 0 12px; padding-left: 4px; }
+    .items li { list-style: none; margin: 4px 0; }
+    .items .lab { display:inline-block; min-width: 1.4em; font-weight:600; color:#5f6368; }
+    .items code { background:#f5f2fb; padding:2px 6px; border-radius:4px; font-size:15px; }
+    label.fld { display:block; font-size: 13px; color:#5f6368; margin: 14px 0 6px; }
+    input, textarea { width: 100%; padding: 10px; border:1px solid var(--line);
+                      border-radius: 6px; font: inherit; }
+    textarea { min-height: 84px; resize: vertical; line-height:1.5; }
+    .toolbar { display:flex; flex-wrap:wrap; gap:6px; margin: 4px 0 8px; }
+    .toolbar button { background:#f5f2fb; border:1px solid var(--line); border-radius:6px;
+                      padding:5px 9px; font-size:15px; cursor:pointer; min-width:34px; }
+    .toolbar button:hover { background:#ece4fb; }
+    .preview { border:1px dashed var(--line); border-radius:6px; padding:8px 10px;
+               min-height: 24px; margin-top:8px; font-size:15px; background:#fafafa;
+               color:#111; overflow-x:auto; }
+    .preview .plabel { font-size:11px; color:#9aa0a6; display:block; margin-bottom:2px;
+                       text-transform:uppercase; letter-spacing:.04em; }
+    .qfoot { display:flex; align-items:center; gap:12px; margin-top:12px; }
+    .btn { background: var(--accent); color:#fff; border:0; padding: 9px 20px;
+           border-radius: 6px; font-size: 14px; cursor: pointer; }
+    .btn:disabled { opacity:.5; cursor:default; }
+    .save-state { font-size: 13px; min-height: 18px; }
+    .save-state.ok { color: var(--ok); } .save-state.err { color: var(--err); }
+    .save-state.dirty { color:#b06000; }
+    #banner { position: sticky; top:0; z-index:5; text-align:center; font-size:14px;
+              padding:8px; border-radius:6px; margin:0 auto 14px; max-width:680px; }
+    #timer { font-variant-numeric: tabular-nums; font-weight:600; }
+    .hidden { display:none; }
+    .note { font-size:12px; color:#5f6368; margin-top:6px; }
+    .center-msg { text-align:center; color:#444; }
+  </style>
+</head>
+<body>
+  <!-- ===== CONFIG ===== -->
+  <script>
+    const FUNCTION_URL = "https://rftveyvbitiysymutdir.supabase.co/functions/v1/submit";
+    let QUIZ_ID = null; // set from the server: whichever quiz is currently open
+  </script>
+
+  <div id="banner" class="hidden"></div>
+
+  <!-- ===== LOGIN ===== -->
+  <div id="login">
+    <div class="card top">
+      <h1>ILC — Atividades práticas</h1>
+      <p class="desc">Atividade prática individual. Informe seu nome e e-mail para começar.
+        Você pode reenviar cada resposta até o fim do tempo —
+        vale a <strong>última versão</strong> enviada.</p>
+      <label class="fld">Seu nome completo</label>
+      <input id="name" placeholder="Ex.: Maria Silva" autocomplete="off" />
+      <label class="fld">Seu e-mail</label>
+      <input id="email" type="email" placeholder="voce@exemplo.com" autocomplete="off" />
+      <div class="qfoot">
+        <button class="btn" id="startBtn">Começar</button>
+        <span id="loginMsg" class="save-state"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== QUIZ ===== -->
+  <div id="quiz" class="hidden">
+    <div class="card top">
+      <h1 id="qTitle"></h1>
+      <p class="desc" id="qDesc"></p>
+      <p class="note">🔒 Copiar e colar estão desativados — digite suas respostas. 
+        Dica: escreva as fórmulas entre cifrões, por exemplo <code>$\forall x\,\exists y\,(x&lt;y)$</code>, para visualizá-las renderizadas.</p>
+    </div>
+    <div id="questions"></div>
+    <div class="card center-msg" id="endCard">
+      <p>Ao terminar, verifique que cada questão mostra <strong>“✓ Enviado”</strong>.</p>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    const $ = (id) => document.getElementById(id);
+    let STUDENT = "", EMAIL = "", ENDS_AT = 0, LOCKED = false;
+    const state = {}; // questionId -> { dirty, saved, el }
+
+    // ---------- math toolbar ----------
+    const SYMBOLS = [
+      { l: "$…$", t: "$$", caret: 1 },
+      { l: "∀", t: "\\forall " }, { l: "∃", t: "\\exists " },
+      { l: "¬", t: "\\neg " }, { l: "∧", t: "\\land " }, { l: "∨", t: "\\lor " },
+      { l: "→", t: "\\to " }, { l: "↔", t: "\\leftrightarrow " },
+      { l: "∈", t: "\\in " }, { l: "∉", t: "\\notin " },
+      { l: "≥", t: "\\geq " }, { l: "≤", t: "\\leq " }, { l: "≠", t: "\\neq " },
+      { l: "x²", t: "^{2}" }, { l: "xₙ", t: "_{n}" },
+      { l: "a⁄b", t: "\\frac{}{}", caret: 6 }, { l: "√", t: "\\sqrt{}", caret: 6 },
+      { l: "∑", t: "\\sum " }, { l: "∏", t: "\\prod " },
+      { l: "∅", t: "\\emptyset " }, { l: "ℝ", t: "\\mathbb{R}" },
+    ];
+
+    function insertAtCursor(ta, text, caret) {
+      const s = ta.selectionStart, e = ta.selectionEnd;
+      ta.value = ta.value.slice(0, s) + text + ta.value.slice(e);
+      const pos = s + (caret != null ? caret : text.length);
+      ta.selectionStart = ta.selectionEnd = pos;
+      ta.focus();
+      ta.dispatchEvent(new Event("input"));
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, (c) => (
+        { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+      ));
+    }
+
+    function renderPreview(text) {
+      const re = /\$([^$]+)\$/g;
+      let out = "", last = 0, m;
+      while ((m = re.exec(text))) {
+        out += escapeHtml(text.slice(last, m.index));
+        try {
+          out += katex.renderToString(m[1], { throwOnError: false, displayMode: false });
+        } catch { out += escapeHtml(m[0]); }
+        last = re.lastIndex;
+      }
+      out += escapeHtml(text.slice(last));
+      return out.replace(/\n/g, "<br>");
+    }
+
+    // Markdown + inline math ($...$). Math is pulled out first so LaTeX
+    // backslashes/underscores aren't mangled by the Markdown parser.
+    function renderRich(md) {
+      const math = [];
+      const protectedText = String(md || "").replace(/\$([^$]+)\$/g, (m, tex) => {
+        let html;
+        try { html = katex.renderToString(tex, { throwOnError: false }); }
+        catch { html = escapeHtml(m); }
+        return "@@MATH" + (math.push(html) - 1) + "@@";
+      });
+      let html;
+      try { html = marked.parse(protectedText, { breaks: true }); }
+      catch { html = escapeHtml(protectedText); }
+      // Sanitize the Markdown-derived HTML so a stored prompt can't run scripts.
+      // (Math is reinserted AFTER this, from KaTeX's own trusted output.)
+      if (window.DOMPurify) html = DOMPurify.sanitize(html);
+      return html.replace(/@@MATH(\d+)@@/g, (_, i) => math[+i]);
+    }
+
+    // ---------- networking ----------
+    async function api(payload) {
+      const res = await fetch(FUNCTION_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      let data = {};
+      try { data = await res.json(); } catch {}
+      return { ok: res.ok, status: res.status, data };
+    }
+
+    function lsKey(qid) { return `quiz:${QUIZ_ID}:${EMAIL.toLowerCase()}:${qid}`; }
+
+    // ---------- start ----------
+    $("startBtn").addEventListener("click", start);
+    $("email").addEventListener("keydown", (e) => { if (e.key === "Enter") start(); });
+
+    async function start() {
+      STUDENT = $("name").value.trim();
+      EMAIL = $("email").value.trim();
+      const msg = $("loginMsg");
+      if (!STUDENT) { msg.textContent = "Digite seu nome."; msg.className = "save-state err"; return; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(EMAIL)) { msg.textContent = "Digite um e-mail válido."; msg.className = "save-state err"; return; }
+      msg.textContent = "Carregando…"; msg.className = "save-state";
+      const { ok, status, data } = await api({ action: "load" });
+      if (ok && data.ok) { renderQuiz(data.quiz); return; }
+      if (status === 423) { msg.textContent = "O quiz ainda não está aberto. Aguarde o professor."; }
+      else { msg.textContent = data.error || "Erro ao carregar. Tente novamente."; }
+      msg.className = "save-state err";
+    }
+
+    // ---------- render ----------
+    function renderQuiz(quiz) {
+      $("login").classList.add("hidden");
+      $("quiz").classList.remove("hidden");
+      QUIZ_ID = quiz.id;
+      $("qTitle").textContent = quiz.title;
+      $("qDesc").innerHTML = renderRich(quiz.description || "");
+      ENDS_AT = new Date(quiz.endsAt).getTime();
+
+      const container = $("questions");
+      quiz.questions.forEach((q) => container.appendChild(buildQuestion(q)));
+
+      startTimer();
+    }
+
+    function buildQuestion(q) {
+      const card = document.createElement("div");
+      card.className = "card";
+
+      const prompt = document.createElement("div");
+      prompt.className = "prompt";
+      prompt.innerHTML = renderRich(q.prompt || "");
+      card.appendChild(prompt);
+
+      // toolbar
+      const tb = document.createElement("div");
+      tb.className = "toolbar";
+      const ta = document.createElement("textarea");
+      SYMBOLS.forEach((sym) => {
+        const b = document.createElement("button");
+        b.type = "button"; b.textContent = sym.l; b.title = sym.t.trim();
+        b.addEventListener("click", () => insertAtCursor(ta, sym.t, sym.caret));
+        tb.appendChild(b);
+      });
+      card.appendChild(tb);
+
+      // textarea (paste disabled)
+      const lab = document.createElement("label");
+      lab.className = "fld"; lab.textContent = "Sua resposta";
+      card.appendChild(lab);
+      ta.placeholder = "Digite sua resposta aqui…";
+      const saved = localStorage.getItem(lsKey(q.id));
+      if (saved != null) ta.value = saved;
+      ["paste", "cut", "copy", "drop"].forEach((ev) =>
+        ta.addEventListener(ev, (e) => e.preventDefault()));
+      card.appendChild(ta);
+
+      // preview
+      const prev = document.createElement("div");
+      prev.className = "preview";
+      prev.innerHTML = `<span class="plabel">Pré-visualização</span>` + renderPreview(ta.value);
+      card.appendChild(prev);
+
+      // footer: submit + state
+      const foot = document.createElement("div");
+      foot.className = "qfoot";
+      const btn = document.createElement("button");
+      btn.className = "btn"; btn.textContent = "Enviar resposta";
+      const st = document.createElement("span");
+      st.className = "save-state";
+      if (saved != null) { st.textContent = "Rascunho salvo localmente"; st.className = "save-state dirty"; }
+      foot.appendChild(btn); foot.appendChild(st);
+      card.appendChild(foot);
+
+      state[q.id] = { dirty: saved != null, el: ta, st };
+
+      ta.addEventListener("input", () => {
+        localStorage.setItem(lsKey(q.id), ta.value);
+        prev.innerHTML = `<span class="plabel">Pré-visualização</span>` + renderPreview(ta.value);
+        state[q.id].dirty = true;
+        if (!LOCKED) { st.textContent = "Alterações não enviadas"; st.className = "save-state dirty"; }
+      });
+
+      btn.addEventListener("click", () => submitOne(q.id, st, btn));
+      return card;
+    }
+
+    async function submitOne(qid, st, btn) {
+      if (LOCKED) return;
+      const ta = state[qid].el;
+      st.textContent = "Enviando…"; st.className = "save-state";
+      if (btn) btn.disabled = true;
+      const { ok, status, data } = await api({
+        action: "submit", quizId: QUIZ_ID,
+        studentName: STUDENT, studentEmail: EMAIL, questionId: qid, answer: ta.value,
+      });
+      if (btn) btn.disabled = false;
+      if (ok && data.ok) {
+        st.textContent = "✓ Enviado"; st.className = "save-state ok";
+        state[qid].dirty = false;
+      } else if (status === 423) {
+        lockQuiz("O tempo terminou — os envios estão fechados.");
+      } else {
+        st.textContent = "✗ " + (data.error || "Falha ao enviar"); st.className = "save-state err";
+      }
+    }
+
+    // ---------- timer ----------
+    function startTimer() {
+      updateTimer();
+      const iv = setInterval(() => { if (updateTimer()) clearInterval(iv); }, 1000);
+    }
+    function updateTimer() {
+      const banner = $("banner");
+      banner.classList.remove("hidden");
+      const left = Math.max(0, Math.floor((ENDS_AT - Date.now()) / 1000));
+      if (left <= 0) {
+        lockQuiz("⏱ O tempo terminou — os envios estão fechados.");
+        return true;
+      }
+      const m = String(Math.floor(left / 60)).padStart(2, "0");
+      const s = String(left % 60).padStart(2, "0");
+      banner.style.background = left <= 120 ? "#fce8e6" : "#e8f0fe";
+      banner.style.color = left <= 120 ? "#c5221f" : "#174ea6";
+      banner.innerHTML = `Tempo restante: <span id="timer">${m}:${s}</span>`;
+      return false;
+    }
+
+    async function lockQuiz(text) {
+      if (LOCKED) return;
+      LOCKED = true;
+      const banner = $("banner");
+      banner.classList.remove("hidden");
+      banner.style.background = "#fce8e6"; banner.style.color = "#c5221f";
+      banner.textContent = text;
+      // best-effort: flush any unsent answers once
+      for (const qid in state) {
+        if (state[qid].dirty) {
+          const s = state[qid];
+          await api({
+            action: "submit", quizId: QUIZ_ID,
+            studentName: STUDENT, studentEmail: EMAIL, questionId: qid, answer: s.el.value,
+          }).then(({ ok, data }) => {
+            if (ok && data.ok) { s.st.textContent = "✓ Enviado (no fechamento)"; s.st.className = "save-state ok"; }
+          }).catch(() => {});
+        }
+        state[qid].el.setAttribute("readonly", "true");
+      }
+      document.querySelectorAll(".btn").forEach((b) => { if (b.id !== "startBtn") b.disabled = true; });
+    }
+  })();
+  </script>
+</body>
+</html>

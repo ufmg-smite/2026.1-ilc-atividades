@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Painel do professor — Quizzes</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Roboto, Arial, sans-serif;
+           background:#f1f3f4; margin:0; padding:24px 12px 60px; color:#202124; }
+    .card { max-width: 760px; margin: 0 auto 14px; background:#fff;
+            border:1px solid #dadce0; border-radius:8px; padding:20px 22px; }
+    h1 { font-size:22px; font-weight:500; margin:0 0 4px; }
+    h2 { font-size:17px; font-weight:500; margin:0 0 12px; }
+    p.sub { color:#5f6368; font-size:13px; margin:0 0 8px; }
+    label { display:block; font-size:13px; color:#5f6368; margin:14px 0 6px; }
+    input, textarea { width:100%; padding:10px; border:1px solid #dadce0; border-radius:6px; font:inherit; }
+    textarea { min-height:120px; resize:vertical; font-family: ui-monospace, Menlo, Consolas, monospace; font-size:13px; line-height:1.5; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:14px; }
+    button { border:0; border-radius:6px; padding:9px 16px; font-size:14px; cursor:pointer; color:#fff; }
+    .open { background:#188038; } .close { background:#d93025; } .status { background:#1a73e8; }
+    .edit { background:#5f6368; } .save { background:#673ab7; } .add { background:#673ab7; }
+    .ghost { background:#fff; color:#1a73e8; border:1px solid #1a73e8; }
+    button:disabled { opacity:.5; cursor:default; }
+    .qlist { width:100%; border-collapse:collapse; margin-top:8px; }
+    .qlist td { border-top:1px solid #eee; padding:8px 6px; font-size:14px; vertical-align:middle; }
+    .pill { display:inline-block; padding:2px 10px; border-radius:12px; font-weight:600; font-size:12px; }
+    .pill.on { background:#e6f4ea; color:#188038; } .pill.off { background:#eee; color:#5f6368; }
+    .mini { color:#5f6368; font-size:12px; }
+    .err { color:#d93025; } .ok { color:#188038; }
+    #msg, #editMsg { font-size:14px; min-height:18px; margin-top:8px; white-space:pre-wrap; }
+    .qblock { border:1px solid #e0e0e0; border-radius:8px; padding:12px; margin-top:12px; background:#fafafa; }
+    .qhead { display:flex; justify-content:space-between; align-items:center; }
+    .preview { border:1px dashed #dadce0; border-radius:6px; padding:8px 10px; margin-top:8px;
+               background:#fff; font-size:14px; overflow-x:auto; }
+    .preview ul { padding-left:20px; } .preview p { margin:0 0 6px; }
+    .preview code { background:#f5f2fb; padding:1px 5px; border-radius:4px; }
+    .hidden { display:none; }
+    .hint { font-size:12px; color:#5f6368; margin-top:4px; }
+  </style>
+</head>
+<body>
+  <script>
+    const FUNCTION_URL = "https://rftveyvbitiysymutdir.supabase.co/functions/v1/submit";
+  </script>
+
+  <!-- ===== auth + quiz list ===== -->
+  <div class="card">
+    <h1>Painel do professor</h1>
+    <p class="sub">Crie e edite quizzes, abra/feche a sessão. O código de admin não é salvo nesta página.</p>
+    <label>Código de admin</label>
+    <input id="admin" type="password" placeholder="ADMIN_CODE" autocomplete="off" />
+    <div class="row">
+      <button class="status" id="listBtn">Carregar quizzes</button>
+      <button class="add" id="newBtn">+ Novo quiz</button>
+    </div>
+    <label style="font-size:13px;color:#5f6368;margin-top:10px;">
+      <input type="checkbox" id="showArchived" style="width:auto;margin-right:6px;vertical-align:middle;">
+      Mostrar quizzes arquivados
+    </label>
+    <div id="msg"></div>
+    <table class="qlist"><tbody id="quizRows"></tbody></table>
+  </div>
+
+  <!-- ===== analysis output ===== -->
+  <div class="card hidden" id="analysisCard">
+    <h2>Análise das respostas</h2>
+    <p class="sub" id="analysisMeta"></p>
+    <div class="preview" id="analysisOut"></div>
+    <p class="hint">Apenas respostas anônimas (sem nome/e-mail) são enviadas ao modelo; o navegador
+      recebe só este resumo.</p>
+  </div>
+
+  <!-- ===== editor ===== -->
+  <div class="card hidden" id="editor">
+    <h2 id="editTitle">Editar quiz</h2>
+    <label>ID do quiz (ex.: <code>ilc-semana3</code>) — pode ser alterado; as respostas já enviadas são migradas junto.</label>
+    <input id="qid" placeholder="ilc-semana3" autocomplete="off" />
+    <label>Título</label>
+    <input id="qtitle" placeholder="ILC — Semana 3" autocomplete="off" />
+    <label>Descrição (Markdown, opcional)</label>
+    <textarea id="qdesc" placeholder="Instruções gerais…"></textarea>
+    <label>Duração (minutos)</label>
+    <input id="qdur" type="number" value="20" min="1" />
+
+    <div id="questions"></div>
+    <div class="row">
+      <button class="add" id="addQ">+ Adicionar questão</button>
+    </div>
+    <div class="row">
+      <button class="save" id="saveBtn">Salvar quiz</button>
+      <button class="ghost" id="cancelBtn">Fechar editor</button>
+      <span id="editMsg"></span>
+    </div>
+    <p class="hint">Dica: use Markdown (<code>**negrito**</code>, listas com <code>-</code>) e fórmulas entre
+      cifrões, ex.: <code>$\forall x\,\exists y\,(x&lt;y)$</code>. A pré-visualização mostra como o aluno verá.</p>
+  </div>
+
+  <script>
+  (function () {
+    const $ = (id) => document.getElementById(id);
+    const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+    function renderRich(md) {
+      const math = [];
+      const pt = String(md || "").replace(/\$([^$]+)\$/g, (m, tex) => {
+        let h; try { h = katex.renderToString(tex, { throwOnError: false }); }
+        catch { h = escapeHtml(m); }
+        return "@@MATH" + (math.push(h) - 1) + "@@";
+      });
+      let html; try { html = marked.parse(pt, { breaks: true }); } catch { html = escapeHtml(pt); }
+      if (window.DOMPurify) html = DOMPurify.sanitize(html);
+      return html.replace(/@@MATH(\d+)@@/g, (_, i) => math[+i]);
+    }
+
+    async function api(payload) {
+      const res = await fetch(FUNCTION_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminCode: $("admin").value.trim(), ...payload }),
+      });
+      let data = {}; try { data = await res.json(); } catch {}
+      return { ok: res.ok, status: res.status, data };
+    }
+    const invalid = (status, d) => status === 403 ? "Código de admin inválido." : (d.error || "Falha.");
+    const fmt = (iso) => iso ? new Date(iso).toLocaleString() : "—";
+
+    // ---------- quiz list ----------
+    $("listBtn").addEventListener("click", loadList);
+    $("showArchived").addEventListener("change", loadList);
+    async function loadList() {
+      $("msg").textContent = "Carregando…"; $("msg").className = "";
+      const { ok, status, data } = await api({
+        action: "listQuizzes", includeArchived: $("showArchived").checked,
+      });
+      if (!ok || !data.ok) { $("msg").textContent = invalid(status, data); $("msg").className = "err"; return; }
+      $("msg").textContent = "";
+      const tb = $("quizRows"); tb.innerHTML = "";
+      if (!data.quizzes.length) { $("msg").textContent = "Nenhum quiz ainda. Clique em “+ Novo quiz”."; return; }
+      data.quizzes.forEach((q) => {
+        const tr = document.createElement("tr");
+        if (q.archived) tr.style.opacity = "0.6";
+        const pill = q.archived
+          ? '<span class="pill off">arquivado</span>'
+          : (q.isOpen ? '<span class="pill on">ABERTO</span>' : '<span class="pill off">fechado</span>');
+        tr.innerHTML =
+          `<td><strong>${escapeHtml(q.title)}</strong><br><span class="mini">${escapeHtml(q.id)}</span></td>` +
+          `<td>${pill}${(!q.archived && q.isOpen) ? '<br><span class="mini">fecha ' + fmt(q.endsAt) + '</span>' : ''}</td>` +
+          `<td></td>`;
+        const actions = tr.children[2];
+        if (!q.archived) {
+          actions.appendChild(mkBtn("Abrir", "open", () => doOpen(q.id)));
+          actions.appendChild(mkBtn("Fechar", "close", () => doClose(q.id)));
+          actions.appendChild(mkBtn("Status", "status", () => doStatus(q.id)));
+          actions.appendChild(mkBtn("Editar", "edit", () => openEditor(q.id)));
+          actions.appendChild(mkBtn("Analisar", "status", () => doAnalyze(q.id)));
+          actions.appendChild(mkBtn("Arquivar", "close", () => doArchive(q.id, true)));
+        } else {
+          actions.appendChild(mkBtn("Analisar", "status", () => doAnalyze(q.id)));
+          actions.appendChild(mkBtn("Editar", "edit", () => openEditor(q.id)));
+          actions.appendChild(mkBtn("Restaurar", "open", () => doArchive(q.id, false)));
+        }
+        tb.appendChild(tr);
+      });
+    }
+
+    async function doAnalyze(id) {
+      $("analysisCard").classList.remove("hidden");
+      $("analysisMeta").textContent = "Analisando as respostas… isso pode levar alguns segundos.";
+      $("analysisOut").innerHTML = "";
+      $("analysisCard").scrollIntoView({ behavior: "smooth" });
+      const { ok, status, data } = await api({ action: "analyze", quizId: id });
+      if (ok && data.ok) {
+        $("analysisMeta").textContent = `${data.students} alunos · ${data.questions} questões`;
+        // plain Markdown only (no KaTeX) — robust to whatever $-signs the model emits
+        let html;
+        try { html = marked.parse(String(data.summary || ""), { breaks: true }); }
+        catch { html = escapeHtml(String(data.summary || "")); }
+        if (window.DOMPurify) html = DOMPurify.sanitize(html);
+        $("analysisOut").innerHTML = html;
+      } else {
+        $("analysisMeta").textContent = "";
+        $("analysisOut").innerHTML = `<span class="err">${escapeHtml(invalid(status, data))}</span>`;
+      }
+    }
+
+    async function doArchive(id, archived) {
+      if (archived && !confirm(`Arquivar “${id}”? Sai da lista, mas nada é apagado — pode restaurar depois.`)) return;
+      const { ok, status, data } = await api({ action: "setArchived", quizId: id, archived });
+      if (ok && data.ok) loadList();
+      else { $("msg").textContent = invalid(status, data); $("msg").className = "err"; }
+    }
+    function mkBtn(label, cls, fn) {
+      const b = document.createElement("button");
+      b.textContent = label; b.className = cls; b.style.marginRight = "6px"; b.style.marginBottom = "4px";
+      b.addEventListener("click", fn); return b;
+    }
+
+    async function doOpen(id) {
+      const { ok, status, data } = await api({ action: "open", quizId: id });
+      $("msg").className = ok && data.ok ? "ok" : "err";
+      $("msg").textContent = ok && data.ok ? `✓ “${id}” aberto. Fecha em ${fmt(data.endsAt)}.` : invalid(status, data);
+      loadList();
+    }
+    async function doClose(id) {
+      if (!confirm(`Fechar “${id}” agora?`)) return;
+      const { ok, status, data } = await api({ action: "close", quizId: id });
+      $("msg").className = ok && data.ok ? "ok" : "err";
+      $("msg").textContent = ok && data.ok ? `✓ “${id}” fechado.` : invalid(status, data);
+      loadList();
+    }
+    async function doStatus(id) {
+      const { ok, status, data } = await api({ action: "status", quizId: id });
+      if (!ok || !data.ok) { $("msg").textContent = invalid(status, data); $("msg").className = "err"; return; }
+      const s = data.status; $("msg").className = "";
+      $("msg").textContent = `“${id}” — ${s.isOpen ? "ABERTO" : "fechado"} · envios: ${s.submissions} · fecha ${fmt(s.endsAt)}`;
+    }
+
+    // ---------- editor ----------
+    let editingOriginalId = null; // id the editor was opened with (null = new quiz)
+    $("newBtn").addEventListener("click", () => openEditor(null));
+    $("cancelBtn").addEventListener("click", () => $("editor").classList.add("hidden"));
+    $("addQ").addEventListener("click", () => addQuestion(nextQId(), ""));
+    $("saveBtn").addEventListener("click", saveQuiz);
+
+    function nextQId() {
+      const used = [...document.querySelectorAll(".qblock")].map((b) => b.dataset.qid);
+      let n = 1; while (used.includes("q" + n)) n++;
+      return "q" + n;
+    }
+
+    async function openEditor(id) {
+      $("questions").innerHTML = "";
+      $("editMsg").textContent = "";
+      if (id) {
+        const { ok, status, data } = await api({ action: "getQuiz", quizId: id });
+        if (!ok || !data.ok) { $("msg").textContent = invalid(status, data); $("msg").className = "err"; return; }
+        const q = data.quiz;
+        $("editTitle").textContent = "Editar: " + q.id;
+        editingOriginalId = q.id;
+        $("qid").value = q.id; $("qid").disabled = false;
+        $("qtitle").value = q.title || "";
+        $("qdesc").value = q.description || "";
+        $("qdur").value = q.durationMinutes || 20;
+        (q.questions || []).forEach((qq) => addQuestion(qq.id, qq.prompt));
+        if (!q.questions || !q.questions.length) addQuestion("q1", "");
+      } else {
+        $("editTitle").textContent = "Novo quiz";
+        editingOriginalId = null;
+        $("qid").value = ""; $("qid").disabled = false;
+        $("qtitle").value = ""; $("qdesc").value = ""; $("qdur").value = 20;
+        addQuestion("q1", "");
+      }
+      $("editor").classList.remove("hidden");
+      $("editor").scrollIntoView({ behavior: "smooth" });
+    }
+
+    function addQuestion(qid, prompt) {
+      const block = document.createElement("div");
+      block.className = "qblock"; block.dataset.qid = qid;
+      block.innerHTML =
+        `<div class="qhead"><strong>Questão <span class="qidlabel"></span></strong>` +
+        `<button class="close rm" type="button">Remover</button></div>`;
+      block.querySelector(".qidlabel").textContent = "(" + qid + ")";
+      const ta = document.createElement("textarea");
+      ta.value = prompt || "";
+      ta.placeholder = "Enunciado em Markdown. Fórmulas entre $...$";
+      const prev = document.createElement("div");
+      prev.className = "preview";
+      const paint = () => { prev.innerHTML = renderRich(ta.value) || '<span class="mini">pré-visualização</span>'; };
+      ta.addEventListener("input", paint);
+      block.appendChild(ta); block.appendChild(prev);
+      block.querySelector(".rm").addEventListener("click", () => block.remove());
+      $("questions").appendChild(block);
+      paint();
+    }
+
+    function collectQuestions() {
+      return [...document.querySelectorAll(".qblock")].map((b) => ({
+        id: b.dataset.qid,
+        prompt: b.querySelector("textarea").value,
+      }));
+    }
+
+    async function saveQuiz() {
+      const newId = $("qid").value.trim();
+      $("editMsg").textContent = "Salvando…"; $("editMsg").className = "";
+
+      // If editing an existing quiz and the id changed, rename first (migrates answers).
+      if (editingOriginalId && newId !== editingOriginalId) {
+        const rn = await api({ action: "renameQuiz", oldId: editingOriginalId, newId });
+        if (!rn.ok || !rn.data.ok) {
+          $("editMsg").textContent = invalid(rn.status, rn.data); $("editMsg").className = "err"; return;
+        }
+        editingOriginalId = newId;
+      }
+
+      const { ok, status, data } = await api({
+        action: "saveQuiz",
+        quizId: newId,
+        title: $("qtitle").value.trim(),
+        description: $("qdesc").value,
+        durationMinutes: parseInt($("qdur").value, 10) || 20,
+        questions: collectQuestions(),
+      });
+      if (ok && data.ok) {
+        editingOriginalId = newId;
+        $("editMsg").textContent = data.created ? "✓ Quiz criado." : "✓ Alterações salvas.";
+        $("editMsg").className = "ok";
+        loadList();
+      } else {
+        $("editMsg").textContent = invalid(status, data); $("editMsg").className = "err";
+      }
+    }
+  })();
+  </script>
+</body>
+</html>
