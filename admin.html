@@ -40,10 +40,6 @@
     .preview ul { padding-left:20px; } .preview p { margin:0 0 6px; }
     .preview code { background:#f5f2fb; padding:1px 5px; border-radius:4px; }
     .hidden { display:none; }
-    .gallery { display:flex; flex-wrap:wrap; gap:10px; margin-top:8px; }
-    .gcard { border:1px solid #dadce0; border-radius:6px; padding:6px; width:150px; }
-    .gcard img { width:100%; border-radius:4px; display:block; }
-    .gcard .who { font-size:11px; color:#5f6368; margin-top:4px; word-break:break-all; }
     .hint { font-size:12px; color:#5f6368; margin-top:4px; }
   </style>
 </head>
@@ -81,18 +77,6 @@
     <div class="preview" id="analysisOut"></div>
     <p class="hint">Apenas respostas anônimas (sem nome/e-mail) são enviadas ao modelo; o navegador
       recebe só este resumo.</p>
-  </div>
-
-  <!-- ===== photo answers ===== -->
-  <div class="card hidden" id="imagesCard">
-    <h2>Imagens enviadas</h2>
-    <p class="sub" id="imagesMeta"></p>
-    <div id="imagesOut" class="gallery"></div>
-    <div class="row">
-      <button class="close" id="purgeBtn">Apagar todas as imagens deste quiz</button>
-    </div>
-    <p class="hint">As imagens ficam em armazenamento privado. Apague-as após discutir em aula
-      para manter o uso de espaço baixo.</p>
   </div>
 
   <!-- ===== editor ===== -->
@@ -191,11 +175,9 @@
           actions.appendChild(mkBtn("Status", "status", () => doStatus(q.id)));
           actions.appendChild(mkBtn("Editar", "edit", () => openEditor(q.id)));
           actions.appendChild(mkBtn("Analisar", "status", () => doAnalyze(q.id)));
-          actions.appendChild(mkBtn("Imagens", "status", () => doImages(q.id)));
           actions.appendChild(mkBtn("Arquivar", "close", () => doArchive(q.id, true)));
         } else {
           actions.appendChild(mkBtn("Analisar", "status", () => doAnalyze(q.id)));
-          actions.appendChild(mkBtn("Imagens", "status", () => doImages(q.id)));
           actions.appendChild(mkBtn("Editar", "edit", () => openEditor(q.id)));
           actions.appendChild(mkBtn("Restaurar", "open", () => doArchive(q.id, false)));
         }
@@ -230,38 +212,6 @@
       else { $("msg").textContent = invalid(status, data); $("msg").className = "err"; }
     }
 
-    // ---------- photo answers ----------
-    let imagesQuizId = null;
-    async function doImages(id) {
-      imagesQuizId = id;
-      $("imagesCard").classList.remove("hidden");
-      $("imagesMeta").textContent = "Carregando imagens…";
-      $("imagesOut").innerHTML = "";
-      $("imagesCard").scrollIntoView({ behavior: "smooth" });
-      const { ok, status, data } = await api({ action: "listImages", quizId: id });
-      if (!ok || !data.ok) { $("imagesMeta").textContent = invalid(status, data); return; }
-      const imgs = data.images || [];
-      $("imagesMeta").textContent = imgs.length
-        ? `${imgs.length} imagem(ns) — quiz “${id}”`
-        : "Nenhuma imagem enviada.";
-      const out = $("imagesOut"); out.innerHTML = "";
-      imgs.forEach((im) => {
-        const c = document.createElement("div"); c.className = "gcard";
-        const a = document.createElement("a"); a.href = im.url || "#"; a.target = "_blank"; a.rel = "noopener";
-        const img = document.createElement("img"); img.src = im.url || ""; img.alt = "foto";
-        a.appendChild(img);
-        const who = document.createElement("div"); who.className = "who";
-        who.textContent = `${im.questionId} · ${im.studentName}`;
-        c.appendChild(a); c.appendChild(who); out.appendChild(c);
-      });
-    }
-    $("purgeBtn").addEventListener("click", async () => {
-      if (!imagesQuizId) return;
-      if (!confirm(`Apagar TODAS as imagens do quiz “${imagesQuizId}”? Não pode ser desfeito.`)) return;
-      const { ok, status, data } = await api({ action: "purgeImages", quizId: imagesQuizId });
-      if (ok && data.ok) { $("imagesMeta").textContent = `Apagadas ${data.deleted} imagem(ns).`; $("imagesOut").innerHTML = ""; }
-      else { $("imagesMeta").textContent = invalid(status, data); }
-    });
     function mkBtn(label, cls, fn) {
       const b = document.createElement("button");
       b.textContent = label; b.className = cls; b.style.marginRight = "6px"; b.style.marginBottom = "4px";

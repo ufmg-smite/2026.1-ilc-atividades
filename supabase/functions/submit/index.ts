@@ -33,7 +33,7 @@ const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BUCKET = "answers"; // private Storage bucket for photo answers
 const ADMIN_ACTIONS = new Set([
   "open", "close", "status", "listQuizzes", "getQuiz", "saveQuiz", "renameQuiz",
-  "setArchived", "analyze", "listImages", "purgeImages",
+  "setArchived", "analyze",
 ]);
 
 function json(body: unknown, status: number): Response {
@@ -356,50 +356,6 @@ Deno.serve(async (req) => {
       return json({ ok: true, summary, students: studentCount, questions: questionCount }, 200);
     }
 
-    if (action === "listImages") {
-      const res = await db(
-        `answer_images?quiz_id=eq.${encodeURIComponent(p.quizId)}` +
-        `&select=id,question_id,student_name,student_email,path,created_at&order=question_id,created_at`,
-      );
-      if (!res.ok) return json({ error: "Falha ao listar imagens" }, 500);
-      const rows = await res.json();
-      const images: any[] = [];
-      for (const row of rows) {
-        const s = await storage(`object/sign/${BUCKET}/${row.path}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ expiresIn: 3600 }),
-        });
-        let url: string | null = null;
-        if (s.ok) { const d = await s.json(); url = `${SUPA_URL}/storage/v1${d.signedURL}`; }
-        images.push({
-          id: row.id, questionId: row.question_id, studentName: row.student_name,
-          studentEmail: row.student_email, url, createdAt: row.created_at,
-        });
-      }
-      return json({ ok: true, images }, 200);
-    }
-
-    if (action === "purgeImages") {
-      const res = await db(
-        `answer_images?quiz_id=eq.${encodeURIComponent(p.quizId)}&select=path`,
-      );
-      const rows = res.ok ? await res.json() : [];
-      let deleted = 0;
-      if (rows.length) {
-        await storage(`object/${BUCKET}`, {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prefixes: rows.map((r: any) => r.path) }),
-        });
-        await db(`answer_images?quiz_id=eq.${encodeURIComponent(p.quizId)}`, {
-          method: "DELETE", headers: { Prefer: "return=minimal" },
-        });
-        deleted = rows.length;
-      }
-      return json({ ok: true, deleted }, 200);
-    }
-
     // open / close / status operate on a specific quiz
     const quiz = await getQuiz(p.quizId);
     if (!quiz) return json({ error: "Quiz not found" }, 404);
@@ -462,7 +418,7 @@ Deno.serve(async (req) => {
   }
 
   if (action === "submit" || action === undefined) {
-    const { quizId, studentName, studentEmail, questionId, answer } = p;
+    const { quizId, studentName, studentEmail, questionId, answer, imageIds } = p;
     if (!quizId || !studentName || !studentEmail || !questionId || typeof answer !== "string") {
       return json({ error: "Missing fields" }, 400);
     }
@@ -483,11 +439,27 @@ Deno.serve(async (req) => {
     }
     await rateHit(bucket);
 
+    // Confirmed photos: keep only image ids that belong to THIS student + question
+    // (students can only attach their own uploads; nothing here deletes anything).
+    let validIds: number[] = [];
+    if (Array.isArray(imageIds) && imageIds.length) {
+      const idList = imageIds.filter((x: any) => Number.isInteger(x)).slice(0, 30);
+      if (idList.length) {
+        const chk = await db(
+          `answer_images?quiz_id=eq.${encodeURIComponent(quizId)}` +
+          `&question_id=eq.${encodeURIComponent(questionId)}` +
+          `&student_email=eq.${encodeURIComponent(studentEmail)}` +
+          `&id=in.(${idList.join(",")})&select=id`,
+        );
+        if (chk.ok) validIds = (await chk.json()).map((x: any) => x.id);
+      }
+    }
+
     const r = await db(`submissions`, {
       method: "POST", headers: { Prefer: "return=minimal" },
       body: JSON.stringify({
         quiz_id: quizId, student_name: studentName, student_email: studentEmail,
-        question_id: questionId, answer,
+        question_id: questionId, answer, image_ids: validIds,
       }),
     });
     if (!r.ok) return json({ error: "Could not save answer" }, 500);
@@ -522,7 +494,7 @@ Deno.serve(async (req) => {
       return json({ error: "Muitas imagens em pouco tempo. Aguarde um momento." }, 429);
     }
     await rateHit(bucket);
-    if (await imageCount(quizId, questionId, studentEmail) >= 12) {
+    if (await imageCount(quizId, questionId, studentEmail) >= 30) {
       return json({ error: "Limite de imagens por questão atingido." }, 429);
     }
 
@@ -545,22 +517,6 @@ Deno.serve(async (req) => {
     if (!r.ok) return json({ error: "Falha ao registrar imagem" }, 500);
     const rows = await r.json();
     return json({ ok: true, id: rows[0]?.id }, 200);
-  }
-
-  if (action === "deleteImage") {
-    const { id, studentEmail } = p;
-    if (!id || !studentEmail) return json({ error: "Missing fields" }, 400);
-    const res = await db(
-      `answer_images?id=eq.${encodeURIComponent(id)}` +
-      `&student_email=eq.${encodeURIComponent(studentEmail)}&select=path`,
-    );
-    const rows = res.ok ? await res.json() : [];
-    if (!rows.length) return json({ error: "Imagem não encontrada" }, 404);
-    await storage(`object/${BUCKET}/${rows[0].path}`, { method: "DELETE" });
-    await db(`answer_images?id=eq.${encodeURIComponent(id)}`, {
-      method: "DELETE", headers: { Prefer: "return=minimal" },
-    });
-    return json({ ok: true }, 200);
   }
 
   return json({ error: "Unknown action" }, 400);

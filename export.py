@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-Export quiz answers from Supabase into ONE spreadsheet file.
+Export a quiz's answers (text + confirmed photos) from Supabase into ONE folder
+that is easy to drag into a Claude chat and ask for feedback.
 
-- One row per student (identified by email), one column per question,
-  plus name, email, and how many questions they answered.
-- Keeps only each student's LAST version per question ("last wins").
-- No timestamps (they weren't informative).
-- Pure standard library: runs on any Python 3, Windows / macOS / Linux,
-  nothing to `pip install`. The service_role key is read from an
-  environment variable so it is NEVER written into the repo.
+- Pure standard library (Python 3, any OS). Reads the service_role key from an
+  environment variable; it is never written to disk. Deleting data still requires
+  the Supabase dashboard (2FA) — this script only READS.
+- Keeps each student's LAST submission per question ("last wins"), and downloads
+  only the photos that were confirmed with that submission.
 
 Usage (macOS / Linux):
     export SUPABASE_URL="https://YOUR-PROJECT-REF.supabase.co"
@@ -20,8 +19,10 @@ Usage (Windows PowerShell):
     $env:SUPABASE_SERVICE_ROLE_KEY="eyJ...service_role key..."
     python export.py <quiz-id>
 
-The single argument is the quiz_id to export (its id as shown in the admin panel).
-Output: <quiz_id>.csv  (open in Excel / Google Sheets, or hand to an LLM).
+Output folder: <quiz-id>_export/
+    respostas.csv      one row per student, one column per question (text answers)
+    para_analise.md    per question: each student's text + the filenames of their photos
+    <qid>__<name>__<n>.webp   the photo files (flat, so you can select-all and attach)
 """
 
 import csv
@@ -32,61 +33,103 @@ import sys
 import urllib.parse
 import urllib.request
 
+BUCKET = "answers"
+
 def qsort_key(qid):
-    """Natural sort so q2 comes before q10."""
     m = re.search(r"(\d+)$", qid)
     return (re.sub(r"\d+$", "", qid), int(m.group(1)) if m else 0, qid)
+
+def san(s):
+    return re.sub(r"[^a-z0-9]+", "-", (s or "").lower()).strip("-") or "aluno"
+
+def api_get(base, key, path):
+    req = urllib.request.Request(f"{base}{path}", headers={
+        "apikey": key, "Authorization": f"Bearer {key}",
+    })
+    with urllib.request.urlopen(req) as r:
+        return r.read()
 
 def main():
     base = os.environ.get("SUPABASE_URL", "").rstrip("/")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
     if not base or not key:
         sys.exit("Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables first.")
-
     if len(sys.argv) < 2:
         sys.exit("Uso: python3 export.py <quiz-id>   (o id do quiz, como aparece no painel do professor)")
     quiz_id = sys.argv[1]
 
-    query = urllib.parse.urlencode({
+    # 1. submissions — keep the latest per (student, question)
+    q = urllib.parse.urlencode({
         "quiz_id": f"eq.{quiz_id}",
-        "select": "student_name,student_email,question_id,answer,created_at",
-        "order": "created_at",  # oldest -> newest, so the last seen is the latest
+        "select": "student_name,student_email,question_id,answer,image_ids,created_at",
+        "order": "created_at",
     })
-    req = urllib.request.Request(f"{base}/rest/v1/submissions?{query}", headers={
-        "apikey": key,
-        "Authorization": f"Bearer {key}",
-    })
-    with urllib.request.urlopen(req) as resp:
-        rows = json.loads(resp.read().decode("utf-8"))
-
-    if not rows:
-        print(f"No submissions found for quiz_id='{quiz_id}'.")
+    subs = json.loads(api_get(base, key, f"/rest/v1/submissions?{q}"))
+    if not subs:
+        print(f"No submissions for quiz_id='{quiz_id}'.")
         return
 
-    students = {}   # id -> {"name":..., "email":...}
-    latest = {}     # (id, question_id) -> answer
-    questions = set()
-    for r in rows:  # ordered oldest -> newest
-        email = (r.get("student_email") or "").strip()
-        name = (r.get("student_name") or "").strip()
-        sid = email.lower() if email else name.lower()   # email is the stable identity
-        students[sid] = {"name": name, "email": email}   # keep most recent name/email
-        qid = r["question_id"]
-        questions.add(qid)
-        latest[(sid, qid)] = r["answer"]
+    latest = {}     # (email, question_id) -> row
+    students = {}   # email -> name
+    for r in subs:  # oldest -> newest, so the last one wins
+        email = (r.get("student_email") or "").strip().lower()
+        students[email] = (r.get("student_name") or "").strip() or students.get(email, "")
+        latest[(email, r["question_id"])] = r
 
-    qcols = sorted(questions, key=qsort_key)
-    out_path = f"{quiz_id}.csv"
-    with open(out_path, "w", newline="", encoding="utf-8") as f:
+    questions = sorted({qid for (_, qid) in latest}, key=qsort_key)
+
+    # 2. map image id -> storage path
+    iq = urllib.parse.urlencode({"quiz_id": f"eq.{quiz_id}", "select": "id,path"})
+    imgs = json.loads(api_get(base, key, f"/rest/v1/answer_images?{iq}"))
+    id2path = {row["id"]: row["path"] for row in imgs}
+
+    outdir = f"{quiz_id}_export"
+    os.makedirs(outdir, exist_ok=True)
+
+    # 3. text answers as a wide CSV
+    with open(os.path.join(outdir, "respostas.csv"), "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["student_name", "student_email"] + qcols + ["answered"])
-        for sid in sorted(students, key=lambda s: (students[s]["name"].lower(), s)):
-            info = students[sid]
-            answers = [latest.get((sid, q), "") for q in qcols]
-            answered = sum(1 for a in answers if a.strip())
-            w.writerow([info["name"], info["email"]] + answers + [answered])
+        w.writerow(["student_name", "student_email"] + questions + ["answered"])
+        for email in sorted(students, key=lambda e: (students[e].lower(), e)):
+            cells = [(latest.get((email, qid), {}).get("answer", "") or "") for qid in questions]
+            answered = sum(1 for c in cells if c.strip())
+            w.writerow([students[email], email] + cells + [answered])
 
-    print(f"Wrote {out_path}  ({len(students)} students, {len(qcols)} questions).")
+    # 4. download the confirmed photos + build the markdown for analysis
+    md = [f"# {quiz_id} — respostas\n"]
+    total_imgs = 0
+    for qid in questions:
+        md.append(f"\n## {qid}\n")
+        rows = sorted(
+            [(e, r) for (e, qq), r in latest.items() if qq == qid],
+            key=lambda t: students[t[0]].lower(),
+        )
+        for email, r in rows:
+            name = students[email]
+            ans = (r.get("answer") or "").strip()
+            md.append(f"\n**{name}**\n{ans if ans else '(sem texto)'}\n")
+            files = []
+            for n, iid in enumerate(r.get("image_ids") or [], 1):
+                path = id2path.get(iid)
+                if not path:
+                    continue
+                ext = os.path.splitext(path)[1] or ".webp"
+                fname = f"{qid}__{san(name)}__{n}{ext}"
+                try:
+                    data = api_get(base, key, f"/storage/v1/object/{BUCKET}/{path}")
+                    with open(os.path.join(outdir, fname), "wb") as imgf:
+                        imgf.write(data)
+                    files.append(fname)
+                    total_imgs += 1
+                except Exception as ex:
+                    md.append(f"- (falha ao baixar imagem: {ex})\n")
+            if files:
+                md.append("Fotos: " + ", ".join(f"`{x}`" for x in files) + "\n")
+
+    with open(os.path.join(outdir, "para_analise.md"), "w", encoding="utf-8") as f:
+        f.write("".join(md))
+
+    print(f"Wrote {outdir}/  ({len(students)} students, {len(questions)} questions, {total_imgs} photos).")
 
 if __name__ == "__main__":
     main()

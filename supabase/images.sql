@@ -33,5 +33,11 @@ create index if not exists answer_images_quiz_idx
 
 -- Same lockdown as everything else: only the server-side service_role key.
 alter table answer_images enable row level security;
+
+-- Each submission records WHICH photos were confirmed with it (the ids the
+-- student had staged when they clicked Enviar). "Last submission wins" then
+-- naturally selects the final photo set too. Append-only; nothing is deleted.
+alter table submissions
+  add column if not exists image_ids jsonb not null default '[]'::jsonb;
 -- storage.objects already has RLS enabled by default; the function uses the
 -- service_role key (which bypasses RLS), so no bucket policies are needed.

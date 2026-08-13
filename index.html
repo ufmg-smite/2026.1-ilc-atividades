@@ -223,45 +223,49 @@
       });
     }
 
-    async function uploadPhoto(qid, file, thumbs, statusEl) {
+    function markDirty(qid) {
+      state[qid].dirty = true;
+      if (!LOCKED) { state[qid].st.textContent = "Alterações não enviadas"; state[qid].st.className = "save-state dirty"; }
+    }
+
+    // Stage a photo LOCALLY (compressed). Nothing is uploaded until the student
+    // clicks "Enviar"; removing a staged photo is purely local (no server call).
+    async function stagePhoto(qid, file, thumbs, statusEl) {
       if (LOCKED) return;
       if (!file.type.startsWith("image/")) {
         statusEl.textContent = "O arquivo não é uma imagem."; statusEl.className = "save-state err"; return;
+      }
+      const arr = state[qid].photos;
+      if (arr.length >= 15) {
+        statusEl.textContent = "Máximo de 15 fotos por questão."; statusEl.className = "save-state err"; return;
       }
       statusEl.textContent = "Processando imagem…"; statusEl.className = "save-state";
       let blob;
       try { blob = await compressImage(file); } catch { blob = null; }
       if (!blob) { statusEl.textContent = "Falha ao processar a imagem."; statusEl.className = "save-state err"; return; }
-      const mimeType = blob.type || "image/webp";
-      const imageBase64 = await blobToBase64(blob);
-      statusEl.textContent = "Enviando foto…";
-      const { ok, status, data } = await api({
-        action: "uploadImage", quizId: QUIZ_ID,
-        studentName: STUDENT, studentEmail: EMAIL, questionId: qid,
-        imageBase64, mimeType,
-      });
-      if (ok && data.ok) {
-        statusEl.textContent = "✓ Foto enviada"; statusEl.className = "save-state ok";
-        addThumb(thumbs, URL.createObjectURL(blob), data.id);
-      } else if (status === 423) {
-        lockQuiz("⏱ O tempo terminou — os envios estão fechados.");
-      } else {
-        statusEl.textContent = "✗ " + (data.error || "Falha ao enviar a foto"); statusEl.className = "save-state err";
-      }
+      const item = { blob, url: URL.createObjectURL(blob), id: null };
+      arr.push(item);
+      renderThumb(qid, item, thumbs);
+      statusEl.textContent = `${arr.length} foto(s) — clique em “Enviar resposta” para confirmar`;
+      statusEl.className = "save-state dirty";
+      markDirty(qid);
     }
 
-    function addThumb(thumbs, url, id) {
+    function renderThumb(qid, item, thumbs) {
       const wrap = document.createElement("div");
       wrap.className = "thumb";
       const img = document.createElement("img");
-      img.src = url; img.alt = "foto enviada";
+      img.src = item.url; img.alt = "foto";
       const rm = document.createElement("button");
       rm.type = "button"; rm.className = "thumb-rm"; rm.textContent = "✕"; rm.title = "Remover";
-      rm.addEventListener("click", async () => {
+      rm.addEventListener("click", () => {
         if (LOCKED) return;
-        rm.disabled = true;
-        const { ok, data } = await api({ action: "deleteImage", id, studentEmail: EMAIL });
-        if (ok && data.ok) wrap.remove(); else rm.disabled = false;
+        const arr = state[qid].photos;
+        const i = arr.indexOf(item);
+        if (i >= 0) arr.splice(i, 1);
+        try { URL.revokeObjectURL(item.url); } catch {}
+        wrap.remove();
+        markDirty(qid);
       });
       wrap.appendChild(img); wrap.appendChild(rm);
       thumbs.appendChild(wrap);
@@ -349,7 +353,7 @@
       foot.appendChild(btn); foot.appendChild(st);
       card.appendChild(foot);
 
-      state[q.id] = { dirty: saved != null, el: ta, st };
+      state[q.id] = { dirty: saved != null, el: ta, st, photos: [] };
 
       ta.addEventListener("input", () => {
         localStorage.setItem(lsKey(q.id), ta.value);
@@ -367,7 +371,8 @@
       plab.className = "fld"; plab.textContent = "Fotos (opcional)";
       const phint = document.createElement("div");
       phint.className = "hint";
-      phint.textContent = "Para respostas manuscritas — pode enviar várias (uma por página).";
+      phint.textContent = "Para respostas manuscritas — anexe várias (uma por página). " +
+        "Elas são enviadas quando você clica em “Enviar resposta”.";
       const fileInput = document.createElement("input");
       fileInput.type = "file"; fileInput.accept = "image/*";
       fileInput.setAttribute("capture", "environment"); fileInput.multiple = true;
@@ -378,7 +383,7 @@
       fileInput.addEventListener("change", async () => {
         const files = [...fileInput.files];
         fileInput.value = "";
-        for (const f of files) await uploadPhoto(q.id, f, thumbs, pstatus);
+        for (const f of files) await stagePhoto(q.id, f, thumbs, pstatus);
       });
       photos.appendChild(plab); photos.appendChild(phint);
       photos.appendChild(fileInput); photos.appendChild(pstatus); photos.appendChild(thumbs);
@@ -389,17 +394,40 @@
 
     async function submitOne(qid, st, btn) {
       if (LOCKED) return;
-      const ta = state[qid].el;
+      const s = state[qid], ta = s.el;
       st.textContent = "Enviando…"; st.className = "save-state";
       if (btn) btn.disabled = true;
+
+      // upload any staged photos not yet uploaded (a resend won't re-upload them)
+      let failed = 0;
+      for (const item of s.photos) {
+        if (item.id != null) continue;
+        try {
+          const imageBase64 = await blobToBase64(item.blob);
+          const res = await api({
+            action: "uploadImage", quizId: QUIZ_ID,
+            studentName: STUDENT, studentEmail: EMAIL, questionId: qid,
+            imageBase64, mimeType: item.blob.type || "image/webp",
+          });
+          if (res.ok && res.data.ok) item.id = res.data.id;
+          else if (res.status === 423) { lockQuiz("⏱ O tempo terminou — os envios estão fechados."); return; }
+          else failed++;
+        } catch { failed++; }
+      }
+
+      const imageIds = s.photos.filter((p) => p.id != null).map((p) => p.id);
       const { ok, status, data } = await api({
         action: "submit", quizId: QUIZ_ID,
-        studentName: STUDENT, studentEmail: EMAIL, questionId: qid, answer: ta.value,
+        studentName: STUDENT, studentEmail: EMAIL, questionId: qid,
+        answer: ta.value, imageIds,
       });
       if (btn) btn.disabled = false;
       if (ok && data.ok) {
-        st.textContent = "✓ Enviado"; st.className = "save-state ok";
-        state[qid].dirty = false;
+        s.dirty = false;
+        st.textContent = failed
+          ? `✓ Enviado — ${failed} foto(s) falharam, tente de novo`
+          : (imageIds.length ? `✓ Enviado com ${imageIds.length} foto(s)` : "✓ Enviado");
+        st.className = failed ? "save-state err" : "save-state ok";
       } else if (status === 423) {
         lockQuiz("O tempo terminou — os envios estão fechados.");
       } else {
@@ -442,6 +470,7 @@
           await api({
             action: "submit", quizId: QUIZ_ID,
             studentName: STUDENT, studentEmail: EMAIL, questionId: qid, answer: s.el.value,
+            imageIds: s.photos.filter((p) => p.id != null).map((p) => p.id),
           }).then(({ ok, data }) => {
             if (ok && data.ok) { s.st.textContent = "✓ Enviado (no fechamento)"; s.st.className = "save-state ok"; }
           }).catch(() => {});
