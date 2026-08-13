@@ -50,6 +50,15 @@
     .save-state { font-size: 13px; min-height: 18px; }
     .save-state.ok { color: var(--ok); } .save-state.err { color: var(--err); }
     .save-state.dirty { color:#b06000; }
+    .photos { margin-top: 14px; }
+    .photos .hint { font-size:12px; color:#5f6368; margin:2px 0 6px; }
+    .photos input[type=file] { font-size:13px; padding:6px; }
+    .thumbs { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+    .thumb { position:relative; }
+    .thumb img { height:96px; border:1px solid var(--line); border-radius:6px; display:block; }
+    .thumb-rm { position:absolute; top:-7px; right:-7px; width:22px; height:22px; border:0;
+                border-radius:50%; background:var(--err); color:#fff; font-size:12px; line-height:1;
+                cursor:pointer; }
     #banner { position: sticky; top:0; z-index:5; text-align:center; font-size:14px;
               padding:8px; border-radius:6px; margin:0 auto 14px; max-width:680px; }
     #timer { font-variant-numeric: tabular-nums; font-weight:600; }
@@ -181,6 +190,83 @@
 
     function lsKey(qid) { return `quiz:${QUIZ_ID}:${EMAIL.toLowerCase()}:${qid}`; }
 
+    // ---------- photo answers (compress hard, then upload) ----------
+    async function compressImage(file) {
+      const bmp = await createImageBitmap(file);
+      const maxDim = 1400; // long edge — plenty to read handwriting
+      const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+      const w = Math.max(1, Math.round(bmp.width * scale));
+      const h = Math.max(1, Math.round(bmp.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(bmp, 0, 0, w, h);
+      try { // grayscale — handwriting is monochrome
+        const im = ctx.getImageData(0, 0, w, h), d = im.data;
+        for (let i = 0; i < d.length; i += 4) {
+          const g = (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114) | 0;
+          d[i] = d[i + 1] = d[i + 2] = g;
+        }
+        ctx.putImageData(im, 0, 0);
+      } catch {}
+      let blob = await new Promise((r) => canvas.toBlob(r, "image/webp", 0.6));
+      if (!blob) blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.6));
+      return blob;
+    }
+
+    function blobToBase64(blob) {
+      return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(",")[1]);
+        r.onerror = reject;
+        r.readAsDataURL(blob);
+      });
+    }
+
+    async function uploadPhoto(qid, file, thumbs, statusEl) {
+      if (LOCKED) return;
+      if (!file.type.startsWith("image/")) {
+        statusEl.textContent = "O arquivo não é uma imagem."; statusEl.className = "save-state err"; return;
+      }
+      statusEl.textContent = "Processando imagem…"; statusEl.className = "save-state";
+      let blob;
+      try { blob = await compressImage(file); } catch { blob = null; }
+      if (!blob) { statusEl.textContent = "Falha ao processar a imagem."; statusEl.className = "save-state err"; return; }
+      const mimeType = blob.type || "image/webp";
+      const imageBase64 = await blobToBase64(blob);
+      statusEl.textContent = "Enviando foto…";
+      const { ok, status, data } = await api({
+        action: "uploadImage", quizId: QUIZ_ID,
+        studentName: STUDENT, studentEmail: EMAIL, questionId: qid,
+        imageBase64, mimeType,
+      });
+      if (ok && data.ok) {
+        statusEl.textContent = "✓ Foto enviada"; statusEl.className = "save-state ok";
+        addThumb(thumbs, URL.createObjectURL(blob), data.id);
+      } else if (status === 423) {
+        lockQuiz("⏱ O tempo terminou — os envios estão fechados.");
+      } else {
+        statusEl.textContent = "✗ " + (data.error || "Falha ao enviar a foto"); statusEl.className = "save-state err";
+      }
+    }
+
+    function addThumb(thumbs, url, id) {
+      const wrap = document.createElement("div");
+      wrap.className = "thumb";
+      const img = document.createElement("img");
+      img.src = url; img.alt = "foto enviada";
+      const rm = document.createElement("button");
+      rm.type = "button"; rm.className = "thumb-rm"; rm.textContent = "✕"; rm.title = "Remover";
+      rm.addEventListener("click", async () => {
+        if (LOCKED) return;
+        rm.disabled = true;
+        const { ok, data } = await api({ action: "deleteImage", id, studentEmail: EMAIL });
+        if (ok && data.ok) wrap.remove(); else rm.disabled = false;
+      });
+      wrap.appendChild(img); wrap.appendChild(rm);
+      thumbs.appendChild(wrap);
+    }
+
     // ---------- start ----------
     $("startBtn").addEventListener("click", start);
     $("email").addEventListener("keydown", (e) => { if (e.key === "Enter") start(); });
@@ -273,6 +359,31 @@
       });
 
       btn.addEventListener("click", () => submitOne(q.id, st, btn));
+
+      // photos (optional — for handwritten answers; several allowed)
+      const photos = document.createElement("div");
+      photos.className = "photos";
+      const plab = document.createElement("label");
+      plab.className = "fld"; plab.textContent = "Fotos (opcional)";
+      const phint = document.createElement("div");
+      phint.className = "hint";
+      phint.textContent = "Para respostas manuscritas — pode enviar várias (uma por página).";
+      const fileInput = document.createElement("input");
+      fileInput.type = "file"; fileInput.accept = "image/*";
+      fileInput.setAttribute("capture", "environment"); fileInput.multiple = true;
+      const pstatus = document.createElement("span");
+      pstatus.className = "save-state";
+      const thumbs = document.createElement("div");
+      thumbs.className = "thumbs";
+      fileInput.addEventListener("change", async () => {
+        const files = [...fileInput.files];
+        fileInput.value = "";
+        for (const f of files) await uploadPhoto(q.id, f, thumbs, pstatus);
+      });
+      photos.appendChild(plab); photos.appendChild(phint);
+      photos.appendChild(fileInput); photos.appendChild(pstatus); photos.appendChild(thumbs);
+      card.appendChild(photos);
+
       return card;
     }
 
@@ -338,6 +449,7 @@
         state[qid].el.setAttribute("readonly", "true");
       }
       document.querySelectorAll(".btn").forEach((b) => { if (b.id !== "startBtn") b.disabled = true; });
+      document.querySelectorAll('input[type=file], .thumb-rm').forEach((el) => { el.disabled = true; });
     }
   })();
   </script>
