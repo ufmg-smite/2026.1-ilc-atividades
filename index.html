@@ -246,8 +246,8 @@
       const item = { blob, url: URL.createObjectURL(blob), id: null };
       arr.push(item);
       renderThumb(qid, item, thumbs);
-      statusEl.textContent = `${arr.length} foto(s) — clique em “Enviar resposta” para confirmar`;
-      statusEl.className = "save-state dirty";
+      statusEl.textContent = ""; // the thumbnail is the feedback; unsent state shows by the button
+      statusEl.className = "save-state";
       markDirty(qid);
     }
 
@@ -351,7 +351,6 @@
       st.className = "save-state";
       if (saved != null) { st.textContent = "Rascunho salvo localmente"; st.className = "save-state dirty"; }
       foot.appendChild(btn); foot.appendChild(st);
-      card.appendChild(foot);
 
       state[q.id] = { dirty: saved != null, el: ta, st, photos: [] };
 
@@ -385,9 +384,11 @@
         fileInput.value = "";
         for (const f of files) await stagePhoto(q.id, f, thumbs, pstatus);
       });
+      state[q.id].pst = pstatus;
       photos.appendChild(plab); photos.appendChild(phint);
       photos.appendChild(fileInput); photos.appendChild(pstatus); photos.appendChild(thumbs);
       card.appendChild(photos);
+      card.appendChild(foot); // Enviar button sits below the photos
 
       return card;
     }
@@ -424,6 +425,7 @@
       if (btn) btn.disabled = false;
       if (ok && data.ok) {
         s.dirty = false;
+        if (s.pst) { s.pst.textContent = ""; s.pst.className = "save-state"; }
         st.textContent = failed
           ? `✓ Enviado — ${failed} foto(s) falharam, tente de novo`
           : (imageIds.length ? `✓ Enviado com ${imageIds.length} foto(s)` : "✓ Enviado");
