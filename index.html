@@ -43,6 +43,10 @@
                color:#111; overflow-x:auto; }
     .preview .plabel { font-size:11px; color:#9aa0a6; display:block; margin-bottom:2px;
                        text-transform:uppercase; letter-spacing:.04em; }
+    .preview table, .prompt table { border-collapse: collapse; margin: 6px 0; font-size: 14px; }
+    .preview th, .preview td, .prompt th, .prompt td {
+      border: 1px solid var(--line); padding: 3px 10px; text-align: center; }
+    .preview th, .prompt th { background: #f5f2fb; }
     .qfoot { display:flex; align-items:center; gap:12px; margin-top:12px; }
     .btn { background: var(--accent); color:#fff; border:0; padding: 9px 20px;
            border-radius: 6px; font-size: 14px; cursor: pointer; }
@@ -126,6 +130,8 @@
       { l: "a⁄b", t: "\\frac{}{}", caret: 6 }, { l: "√", t: "\\sqrt{}", caret: 6 },
       { l: "∑", t: "\\sum " }, { l: "∏", t: "\\prod " },
       { l: "∅", t: "\\emptyset " }, { l: "ℝ", t: "\\mathbb{R}" },
+      { l: "Tabela", title: "Inserir tabela-verdade (2 variáveis)",
+        t: "\n\n| p | q | resultado |\n|:-:|:-:|:-:|\n| T | T |  |\n| T | F |  |\n| F | T |  |\n| F | F |  |\n" },
     ];
 
     function insertAtCursor(ta, text, caret) {
@@ -319,7 +325,7 @@
       const ta = document.createElement("textarea");
       SYMBOLS.forEach((sym) => {
         const b = document.createElement("button");
-        b.type = "button"; b.textContent = sym.l; b.title = sym.t.trim();
+        b.type = "button"; b.textContent = sym.l; b.title = sym.title || sym.t.trim();
         b.addEventListener("click", () => insertAtCursor(ta, sym.t, sym.caret));
         tb.appendChild(b);
       });
@@ -339,7 +345,7 @@
       // preview
       const prev = document.createElement("div");
       prev.className = "preview";
-      prev.innerHTML = `<span class="plabel">Pré-visualização</span>` + renderPreview(ta.value);
+      prev.innerHTML = `<span class="plabel">Pré-visualização</span>` + renderRich(ta.value);
       card.appendChild(prev);
 
       // footer: submit + state
@@ -356,7 +362,7 @@
 
       ta.addEventListener("input", () => {
         localStorage.setItem(lsKey(q.id), ta.value);
-        prev.innerHTML = `<span class="plabel">Pré-visualização</span>` + renderPreview(ta.value);
+        prev.innerHTML = `<span class="plabel">Pré-visualização</span>` + renderRich(ta.value);
         state[q.id].dirty = true;
         if (!LOCKED) { st.textContent = "Alterações não enviadas"; st.className = "save-state dirty"; }
       });
