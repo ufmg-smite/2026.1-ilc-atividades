@@ -1,6 +1,10 @@
 # Never commit exported answers or any local secrets
 *.csv
 *_for_analysis.txt
+
+# Student data exported by export.py (<quiz-id>_export/: answers, photos, .md).
+# Match every current and future export so student work never reaches the repo.
+*_export/
 .env
 .env.*
 SETUP.md
