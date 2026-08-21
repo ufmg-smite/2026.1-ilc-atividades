@@ -95,6 +95,15 @@ def main():
             answered = sum(1 for c in cells if c.strip())
             w.writerow([students[email], email] + cells + [answered])
 
+    # 3b. timing log — EVERY submission with its timestamp, so you can see when
+    # students answered (during class vs. later in the day) and how much they resent.
+    with open(os.path.join(outdir, "tempos.csv"), "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["student_name", "student_email", "question_id", "created_at_utc"])
+        for r in subs:  # already ordered oldest -> newest
+            w.writerow([r.get("student_name", ""), r.get("student_email", ""),
+                        r["question_id"], r.get("created_at", "")])
+
     # 4. download the confirmed photos + build the markdown for analysis
     md = [f"# {quiz_id} — respostas\n"]
     total_imgs = 0
