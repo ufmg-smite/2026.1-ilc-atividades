@@ -200,15 +200,53 @@
 
     // ---------- photo answers (compress hard, then upload) ----------
     async function compressImage(file) {
-      const bmp = await createImageBitmap(file);
       const maxDim = 1400; // long edge — plenty to read handwriting
-      const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
-      const w = Math.max(1, Math.round(bmp.width * scale));
-      const h = Math.max(1, Math.round(bmp.height * scale));
+
+      // Read the intrinsic size cheaply (an offscreen <img> parses the header
+      // without forcing a full-resolution pixel decode), so we can decode the
+      // photo already DOWNSCALED. Decoding a 50 MP photo at full resolution
+      // (~200 MB in RAM) is what crashes mobile browser tabs with "out of
+      // memory" and drops the session.
+      let iw = 0, ih = 0;
+      const url = URL.createObjectURL(file);
+      try {
+        const el = await new Promise((res, rej) => {
+          const im = new Image();
+          im.onload = () => res(im);
+          im.onerror = rej;
+          im.src = url;
+        });
+        iw = el.naturalWidth; ih = el.naturalHeight;
+      } catch {}
+
+      const long = Math.max(iw, ih);
+      const needScale = long > maxDim;
+      const scale = needScale ? maxDim / long : 1;
+      const tw = iw ? Math.max(1, Math.round(iw * scale)) : undefined;
+      const th = ih ? Math.max(1, Math.round(ih * scale)) : undefined;
+
+      // Decode downsampled where supported; fall back to a full decode.
+      let bmp;
+      try {
+        bmp = (needScale && tw && th)
+          ? await createImageBitmap(file, { resizeWidth: tw, resizeHeight: th, resizeQuality: "medium" })
+          : await createImageBitmap(file);
+      } catch {
+        try { bmp = await createImageBitmap(file); }
+        catch { URL.revokeObjectURL(url); return null; }
+      }
+      URL.revokeObjectURL(url);
+
+      // The bitmap is already ~<=1400px on its long edge; this only tightens it
+      // if the resize hint was ignored by the browser.
+      const s = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+      const w = Math.max(1, Math.round(bmp.width * s));
+      const h = Math.max(1, Math.round(bmp.height * s));
       const canvas = document.createElement("canvas");
       canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext("2d");
       ctx.drawImage(bmp, 0, 0, w, h);
+      try { bmp.close(); } catch {} // free the decoded pixels immediately
       try { // grayscale — handwriting is monochrome
         const im = ctx.getImageData(0, 0, w, h), d = im.data;
         for (let i = 0; i < d.length; i += 4) {
@@ -219,6 +257,7 @@
       } catch {}
       let blob = await new Promise((r) => canvas.toBlob(r, "image/webp", 0.6));
       if (!blob) blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.6));
+      canvas.width = canvas.height = 0; // release the canvas backing store
       return blob;
     }
 
