@@ -223,7 +223,7 @@ Deno.serve(async (req) => {
 
       const dur = Number.isFinite(p.durationMinutes) && p.durationMinutes > 0
         ? Math.min(Math.floor(p.durationMinutes), 600)
-        : 20;
+        : 30;
       const existing = await getQuiz(quizId);
       const body = { title, description: description ?? null, questions, duration_minutes: dur };
       let r: Response;

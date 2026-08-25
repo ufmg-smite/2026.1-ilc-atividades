@@ -90,7 +90,7 @@
     <label>Descrição (Markdown, opcional)</label>
     <textarea id="qdesc" placeholder="Instruções gerais…"></textarea>
     <label>Duração (minutos)</label>
-    <input id="qdur" type="number" value="20" min="1" />
+    <input id="qdur" type="number" value="30" min="1" />
 
     <div id="questions"></div>
     <div class="row">
@@ -264,14 +264,14 @@
         $("qid").value = q.id; $("qid").disabled = false;
         $("qtitle").value = q.title || "";
         $("qdesc").value = q.description || "";
-        $("qdur").value = q.durationMinutes || 20;
+        $("qdur").value = q.durationMinutes || 30;
         (q.questions || []).forEach((qq) => addQuestion(qq.id, qq.prompt));
         if (!q.questions || !q.questions.length) addQuestion("q1", "");
       } else {
         $("editTitle").textContent = "Novo quiz";
         editingOriginalId = null;
         $("qid").value = ""; $("qid").disabled = false;
-        $("qtitle").value = ""; $("qdesc").value = ""; $("qdur").value = 20;
+        $("qtitle").value = ""; $("qdesc").value = ""; $("qdur").value = 30;
         addQuestion("q1", "");
       }
       $("editor").classList.remove("hidden");
@@ -323,7 +323,7 @@
         quizId: newId,
         title: $("qtitle").value.trim(),
         description: $("qdesc").value,
-        durationMinutes: parseInt($("qdur").value, 10) || 20,
+        durationMinutes: parseInt($("qdur").value, 10) || 30,
         questions: collectQuestions(),
       });
       if (ok && data.ok) {
