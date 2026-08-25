@@ -5,6 +5,9 @@
 # Student data exported by export.py (<quiz-id>_export/: answers, photos, .md).
 # Match every current and future export so student work never reaches the repo.
 *_export/
+
+# Generated correction sheets / gabaritos and their sources — local only.
+correcoes/
 .env
 .env.*
 SETUP.md
