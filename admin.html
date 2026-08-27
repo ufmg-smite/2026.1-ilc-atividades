@@ -9,6 +9,7 @@
   <script src="lib/katex/katex.min.js"></script>
   <script src="lib/marked.min.js"></script>
   <script src="lib/purify.min.js"></script>
+  <script src="lib/jszip.min.js"></script>
   <style>
     * { box-sizing: border-box; }
     body { font-family: system-ui, -apple-system, Roboto, Arial, sans-serif;
@@ -289,9 +290,11 @@
           actions.appendChild(mkBtn("Status", "status", () => doStatus(q.id)));
           if (cw) actions.appendChild(mkBtn("Editar", "edit", () => openEditor(q.id)));
           actions.appendChild(mkBtn("Analisar", "status", () => doAnalyze(q.id)));
+          actions.appendChild(mkBtn("Baixar", "edit", () => doDownload(q.id)));
           if (cw) actions.appendChild(mkBtn("Arquivar", "close", () => doArchive(q.id, true)));
         } else {
           actions.appendChild(mkBtn("Analisar", "status", () => doAnalyze(q.id)));
+          actions.appendChild(mkBtn("Baixar", "edit", () => doDownload(q.id)));
           if (cw) actions.appendChild(mkBtn("Editar", "edit", () => openEditor(q.id)));
           if (cw) actions.appendChild(mkBtn("Restaurar", "open", () => doArchive(q.id, false)));
         }
@@ -324,6 +327,108 @@
       const { ok, status, data } = await api({ action: "setArchived", quizId: id, archived });
       if (ok && data.ok) loadList();
       else { $("msg").textContent = invalid(status, data); $("msg").className = "err"; }
+    }
+
+    // ---------- download answers (zip: text + photos, like export.py) ----------
+    const csvCell = (v) => {
+      const s = String(v == null ? "" : v);
+      return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const sanName = (s) =>
+      (String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")) || "aluno";
+    const qKey = (qid) => {
+      const m = String(qid).match(/(\d+)$/);
+      return [String(qid).replace(/\d+$/, ""), m ? parseInt(m[1], 10) : 0, String(qid)];
+    };
+    const qCmp = (a, b) => {
+      const ka = qKey(a), kb = qKey(b);
+      if (ka[0] !== kb[0]) return ka[0] < kb[0] ? -1 : 1;
+      if (ka[1] !== kb[1]) return ka[1] - kb[1];
+      return a < b ? -1 : a > b ? 1 : 0;
+    };
+    const extOf = (u) => { const m = String(u || "").split("?")[0].match(/\.([a-z0-9]+)$/i); return m ? m[1].toLowerCase() : "webp"; };
+
+    async function doDownload(id) {
+      if (typeof JSZip === "undefined") { $("msg").className = "err"; $("msg").textContent = "Biblioteca de compactação não carregou."; return; }
+      $("msg").className = ""; $("msg").textContent = "Preparando download…";
+      const { ok, status, data } = await api({ action: "getAnswers", quizId: id });
+      if (!ok || !data.ok) { $("msg").className = "err"; $("msg").textContent = invalid(status, data); return; }
+
+      const subs = data.submissions || [];
+      const id2url = {}; for (const im of (data.images || [])) id2url[im.id] = im.url;
+
+      // latest per (email, question); students email->name (subs are oldest->newest, last wins)
+      const latest = {}, students = {};
+      for (const r of subs) {
+        const email = String(r.student_email || "").trim().toLowerCase();
+        students[email] = String(r.student_name || "").trim() || students[email] || "";
+        latest[email + "||" + r.question_id] = r;
+      }
+      const questions = [...new Set(subs.map((r) => r.question_id))].sort(qCmp);
+      const nameLc = (e) => (students[e] || "").toLowerCase();
+      const emails = Object.keys(students).sort((a, b) =>
+        nameLc(a) < nameLc(b) ? -1 : nameLc(a) > nameLc(b) ? 1 : (a < b ? -1 : a > b ? 1 : 0));
+
+      // respostas.csv (one row per student)
+      let csv = ["student_name", "student_email", ...questions, "answered"].map(csvCell).join(",") + "\r\n";
+      for (const email of emails) {
+        const cells = questions.map((q) => (latest[email + "||" + q] || {}).answer || "");
+        const answered = cells.filter((c) => String(c).trim()).length;
+        csv += [students[email], email, ...cells, answered].map(csvCell).join(",") + "\r\n";
+      }
+      // tempos.csv (every submission)
+      let tempos = ["student_name", "student_email", "question_id", "created_at_utc"].map(csvCell).join(",") + "\r\n";
+      for (const r of subs) {
+        tempos += [r.student_name || "", r.student_email || "", r.question_id, r.created_at || ""].map(csvCell).join(",") + "\r\n";
+      }
+      // para_analise.md + list of photos to fetch
+      let md = `# ${id} — respostas\n`;
+      const photoJobs = [];
+      for (const q of questions) {
+        md += `\n## ${q}\n`;
+        for (const email of emails) {
+          const r = latest[email + "||" + q]; if (!r) continue;
+          const name = students[email];
+          const ans = String(r.answer || "").trim();
+          md += `\n**${name}**\n${ans || "(sem texto)"}\n`;
+          const ids = r.image_ids || [];
+          const files = [];
+          for (let k = 0; k < ids.length; k++) {
+            const url = id2url[ids[k]]; if (!url) continue;
+            const fname = `${q}__${sanName(name)}__${k + 1}.${extOf(url)}`;
+            photoJobs.push({ url, name: fname });
+            files.push(fname);
+          }
+          if (files.length) md += "Fotos: " + files.map((x) => "`" + x + "`").join(", ") + "\n";
+        }
+      }
+
+      const zip = new JSZip();
+      const folder = `${id}_export`;
+      zip.file(`${folder}/respostas.csv`, csv);
+      zip.file(`${folder}/tempos.csv`, tempos);
+      zip.file(`${folder}/para_analise.md`, md);
+
+      let done = 0, failed = 0;
+      for (const job of photoJobs) {
+        $("msg").textContent = `Baixando fotos… ${done}/${photoJobs.length}`;
+        try {
+          const resp = await fetch(job.url);
+          if (!resp.ok) throw new Error("http " + resp.status);
+          zip.file(`${folder}/${job.name}`, await resp.blob());
+        } catch { failed++; }
+        done++;
+      }
+
+      $("msg").textContent = "Compactando…";
+      const blob = await zip.generateAsync({ type: "blob" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = `${folder}.zip`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      $("msg").className = failed ? "err" : "ok";
+      $("msg").textContent = `✓ Download: ${emails.length} alunos, ${photoJobs.length - failed} foto(s)`
+        + (failed ? ` (${failed} falharam)` : "") + ".";
     }
 
     function mkBtn(label, cls, fn) {

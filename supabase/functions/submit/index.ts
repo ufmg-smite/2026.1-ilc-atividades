@@ -33,7 +33,7 @@ const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BUCKET = "answers"; // private Storage bucket for photo answers
 const ADMIN_ACTIONS = new Set([
   "open", "close", "status", "listQuizzes", "getQuiz", "saveQuiz", "renameQuiz",
-  "setArchived", "analyze",
+  "setArchived", "analyze", "getAnswers",
 ]);
 
 function json(body: unknown, status: number): Response {
@@ -175,14 +175,14 @@ async function staffRole(email: string): Promise<string | null> {
 // migration fallback -> teacher).
 async function authStaff(
   req: Request, p: Record<string, any>,
-): Promise<{ email: string; role: string } | { denied: true } | null> {
+): Promise<{ email: string; role: string; via: "google" | "code" } | { denied: true } | null> {
   const email = await verifiedEmail(req);
   if (email) {
     const role = await staffRole(email);
-    return role ? { email, role } : { denied: true };
+    return role ? { email, role, via: "google" } : { denied: true };
   }
   if (p.adminCode && p.adminCode === Deno.env.get("ADMIN_CODE")) {
-    return { email: "admin-code", role: "teacher" };
+    return { email: "admin-code", role: "teacher", via: "code" };
   }
   return null;
 }
@@ -255,6 +255,50 @@ Deno.serve(async (req) => {
           questions: quiz.questions, durationMinutes: quiz.duration_minutes,
         },
       }, 200);
+    }
+
+    // Full answer export (text + photo signed URLs). Reading raw student data
+    // requires a verified Google identity — the ADMIN_CODE path is refused.
+    if (action === "getAnswers") {
+      if (who.via !== "google") {
+        return json({ error: "google_required",
+          message: "Baixar respostas exige login com Google (não pelo código de admin)." }, 403);
+      }
+      const quizId = p.quizId;
+      if (!quizId) return json({ error: "quizId obrigatório" }, 400);
+
+      const sres = await db(
+        `submissions?quiz_id=eq.${encodeURIComponent(quizId)}` +
+        `&select=student_name,student_email,question_id,answer,image_ids,created_at&order=created_at`,
+      );
+      if (!sres.ok) return json({ error: "Falha ao ler respostas" }, 500);
+      const submissions = await sres.json();
+
+      const ires = await db(
+        `answer_images?quiz_id=eq.${encodeURIComponent(quizId)}&select=id,path`,
+      );
+      const imgRows = ires.ok ? await ires.json() : [];
+      let images: any[] = [];
+      if (imgRows.length) {
+        // one batch call to sign every photo URL (valid 15 min); the browser
+        // fetches the bytes directly from Storage and zips them.
+        const paths = imgRows.map((r: any) => r.path);
+        const sign = await storage(`object/sign/${BUCKET}`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ expiresIn: 900, paths }),
+        });
+        const signed = sign.ok ? await sign.json() : [];
+        const byPath: Record<string, string> = {};
+        for (const s of signed) {
+          const u = s.signedURL || s.signedUrl;
+          if (u) byPath[s.path] = u;
+        }
+        images = imgRows.map((r: any) => ({
+          id: r.id,
+          url: byPath[r.path] ? `${SUPA_URL}/storage/v1${byPath[r.path]}` : null,
+        }));
+      }
+      return json({ ok: true, quizId, submissions, images }, 200);
     }
 
     if (action === "saveQuiz") {
