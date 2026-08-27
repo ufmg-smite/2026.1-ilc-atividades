@@ -100,6 +100,23 @@
       recebe só este resumo.</p>
   </div>
 
+  <!-- ===== auto-correction (gabarito) ===== -->
+  <div class="card hidden" id="corrCard">
+    <h2>Correção automática (rascunho)</h2>
+    <p class="sub" id="corrMeta"></p>
+    <div id="corrBlocks"></div>
+    <label>Instruções adicionais para o modelo (opcional)</label>
+    <textarea id="corrInstr" placeholder="Ex.: seja mais conciso na Q3; use notação T/F; não corrija a Q5…"></textarea>
+    <div class="row">
+      <button class="status" id="corrRegen">Gerar novamente</button>
+      <button class="save" id="corrPdf">Baixar PDF (imprimir)</button>
+      <span id="corrMsg" class="mini"></span>
+    </div>
+    <p class="hint">Edite os campos diretamente para ajustes pequenos, ou refine via instruções e gere
+      de novo. O PDF (mesmo layout do gabarito) é gerado só ao imprimir — escolha “Salvar como PDF”.
+      Baseado apenas nas respostas de texto.</p>
+  </div>
+
   <!-- ===== editor ===== -->
   <div class="card hidden" id="editor">
     <h2 id="editTitle">Editar quiz</h2>
@@ -290,10 +307,12 @@
           actions.appendChild(mkBtn("Status", "status", () => doStatus(q.id)));
           if (cw) actions.appendChild(mkBtn("Editar", "edit", () => openEditor(q.id)));
           actions.appendChild(mkBtn("Analisar", "status", () => doAnalyze(q.id)));
+          actions.appendChild(mkBtn("Correção", "save", () => doGenCorrection(q.id)));
           actions.appendChild(mkBtn("Baixar", "edit", () => doDownload(q.id)));
           if (cw) actions.appendChild(mkBtn("Arquivar", "close", () => doArchive(q.id, true)));
         } else {
           actions.appendChild(mkBtn("Analisar", "status", () => doAnalyze(q.id)));
+          actions.appendChild(mkBtn("Correção", "save", () => doGenCorrection(q.id)));
           actions.appendChild(mkBtn("Baixar", "edit", () => doDownload(q.id)));
           if (cw) actions.appendChild(mkBtn("Editar", "edit", () => openEditor(q.id)));
           if (cw) actions.appendChild(mkBtn("Restaurar", "open", () => doArchive(q.id, false)));
@@ -430,6 +449,89 @@
       $("msg").textContent = `✓ Download: ${emails.length} alunos, ${photoJobs.length - failed} foto(s)`
         + (failed ? ` (${failed} falharam)` : "") + ".";
     }
+
+    // ---------- auto-correction (LLM draft -> editable -> print PDF) ----------
+    let CORR = null; // { quizId, title, questions:[{id,enunciado,solucao,nota_tipo,nota}] }
+
+    async function doGenCorrection(id) {
+      $("corrCard").classList.remove("hidden");
+      $("corrMeta").textContent = "Gerando correção… pode levar alguns segundos.";
+      $("corrBlocks").innerHTML = ""; $("corrMsg").textContent = ""; $("corrMsg").className = "mini";
+      $("corrCard").scrollIntoView({ behavior: "smooth" });
+      const { ok, status, data } = await api({ action: "generateCorrection", quizId: id, instructions: $("corrInstr").value });
+      if (!ok || !data.ok) { $("corrMeta").textContent = ""; $("corrMsg").className = "err"; $("corrMsg").textContent = invalid(status, data); return; }
+      CORR = { quizId: id, title: data.title || id, questions: data.questions || [] };
+      $("corrMeta").textContent = `${CORR.questions.length} questões · ${data.students || 0} alunos · edite abaixo se quiser`;
+      renderCorrEditor();
+    }
+
+    function renderCorrEditor() {
+      const box = $("corrBlocks"); box.innerHTML = "";
+      CORR.questions.forEach((q) => {
+        const b = document.createElement("div"); b.className = "qblock";
+        const head = document.createElement("div"); head.className = "qhead";
+        head.innerHTML = `<strong>${escapeHtml(q.id)}</strong>`;
+        const tsel = document.createElement("select");
+        tsel.innerHTML = `<option value="dica">Dica</option><option value="erro">Erro mais comum</option>`;
+        tsel.value = q.nota_tipo === "erro" ? "erro" : "dica"; tsel.style.width = "auto";
+        const tw = document.createElement("span"); tw.className = "mini";
+        tw.appendChild(document.createTextNode("tipo do bloco: ")); tw.appendChild(tsel);
+        head.appendChild(tw); b.appendChild(head);
+        const mk = (txt, val) => {
+          const l = document.createElement("label"); l.textContent = txt; l.style.marginTop = "8px";
+          const t = document.createElement("textarea"); t.value = val || ""; t.style.minHeight = "56px";
+          b.appendChild(l); b.appendChild(t); return t;
+        };
+        const enT = mk("Enunciado", q.enunciado);
+        const soT = mk("Solução", q.solucao);
+        const noT = mk("Comentário (dica/erro)", q.nota);
+        const prev = document.createElement("div"); prev.className = "preview"; prev.style.marginTop = "8px"; b.appendChild(prev);
+        const repaint = () => {
+          q.enunciado = enT.value; q.solucao = soT.value; q.nota = noT.value; q.nota_tipo = tsel.value;
+          const label = q.nota_tipo === "erro" ? "Erro mais comum" : "Dica";
+          const bar = q.nota_tipo === "erro" ? "#c07f2a" : "#3b6ea5";
+          prev.innerHTML =
+            `<div style="opacity:.9">${renderRich(q.enunciado || "")}</div>` +
+            `<div style="margin-top:6px"><strong>Solução.</strong> ${renderRich(q.solucao || "")}</div>` +
+            `<div style="margin-top:6px;border-left:3px solid ${bar};padding-left:8px"><strong>${label}.</strong> ${renderRich(q.nota || "")}</div>`;
+        };
+        [enT, soT, noT].forEach((t) => t.addEventListener("input", repaint));
+        tsel.addEventListener("change", repaint);
+        box.appendChild(b); repaint();
+      });
+    }
+
+    async function regenCorrection() {
+      if (!CORR) return;
+      $("corrMsg").className = "mini"; $("corrMsg").textContent = "Gerando…";
+      const { ok, status, data } = await api({ action: "generateCorrection", quizId: CORR.quizId, instructions: $("corrInstr").value, previous: CORR.questions });
+      if (!ok || !data.ok) { $("corrMsg").className = "err"; $("corrMsg").textContent = invalid(status, data); return; }
+      CORR.questions = data.questions || []; CORR.title = data.title || CORR.title;
+      $("corrMsg").textContent = ""; renderCorrEditor();
+    }
+
+    const CORR_CSS = `@page{size:A4;margin:16mm}*{box-sizing:border-box}body{font-family:Georgia,"Times New Roman",serif;color:#1a1a1a;font-size:11.5pt;line-height:1.4;max-width:780px;margin:0 auto;padding:24px}header{border-bottom:2px solid #1a1a1a;padding-bottom:8px;margin-bottom:14px}h1{font-size:17pt;margin:0 0 2px}.legend{font-size:9.5pt;color:#555;font-style:italic}.q{margin:0 0 16px}h2{font-size:12.5pt;margin:0 0 5px;border-bottom:1px solid #ccc;padding-bottom:2px}.enun{background:#f5f4f1;border-left:4px solid #b9b4a7;padding:7px 12px;margin:3px 0 8px;font-size:10.6pt}.enun p{margin:0 0 6px}.sol{font-size:9pt;letter-spacing:.05em;text-transform:uppercase;color:#8a8a8a;margin:2px 0 3px}.ans{margin:0 0 6px}.ans p{margin:0 0 6px}code{font-family:"DejaVu Sans Mono","Courier New",monospace;font-size:10.3pt}.warn{background:#fbf3e6;border-left:4px solid #c07f2a;padding:7px 11px;margin-top:6px;font-size:10.5pt}.warn b{color:#8a5313}.tip{background:#eef3f7;border-left:4px solid #3b6ea5;padding:7px 11px;margin-top:6px;font-size:10.5pt}.tip b{color:#2c5580}@media print{body{padding:0}}`;
+
+    function corrPrint() {
+      if (!CORR || !CORR.questions.length) { $("corrMsg").className = "err"; $("corrMsg").textContent = "Nada para imprimir."; return; }
+      const katexCss = new URL("lib/katex/katex.min.css", location.href).href;
+      let body = `<header><h1>Correção — ${escapeHtml(CORR.title)}</h1><div class="legend">DCC 638 — Introdução à Lógica Computacional</div></header>`;
+      CORR.questions.forEach((q) => {
+        const isErr = q.nota_tipo === "erro";
+        body += `<div class="q"><h2>${escapeHtml(String(q.id).toUpperCase())}</h2>` +
+          `<div class="enun">${renderRich(q.enunciado || "")}</div>` +
+          `<div class="sol">Solução</div><div class="ans">${renderRich(q.solucao || "")}</div>` +
+          `<div class="${isErr ? "warn" : "tip"}"><b>${isErr ? "Erro mais comum:" : "Dica:"}</b> ${renderRich(q.nota || "")}</div></div>`;
+      });
+      const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Correção — ${escapeHtml(CORR.title)}</title><link rel="stylesheet" href="${katexCss}"><style>${CORR_CSS}</style></head><body>${body}</body></html>`;
+      const w = window.open("", "_blank");
+      if (!w) { $("corrMsg").className = "err"; $("corrMsg").textContent = "Permita pop-ups para gerar o PDF."; return; }
+      w.document.open(); w.document.write(html); w.document.close();
+      setTimeout(() => { try { w.focus(); w.print(); } catch {} }, 500);
+    }
+
+    $("corrRegen").addEventListener("click", regenCorrection);
+    $("corrPdf").addEventListener("click", corrPrint);
 
     function mkBtn(label, cls, fn) {
       const b = document.createElement("button");

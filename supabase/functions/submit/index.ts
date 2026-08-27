@@ -33,7 +33,7 @@ const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BUCKET = "answers"; // private Storage bucket for photo answers
 const ADMIN_ACTIONS = new Set([
   "open", "close", "status", "listQuizzes", "getQuiz", "saveQuiz", "renameQuiz",
-  "setArchived", "analyze", "getAnswers",
+  "setArchived", "analyze", "getAnswers", "generateCorrection",
 ]);
 
 function json(body: unknown, status: number): Response {
@@ -299,6 +299,119 @@ Deno.serve(async (req) => {
         }));
       }
       return json({ ok: true, quizId, submissions, images }, 200);
+    }
+
+    // LLM-drafted correction (gabarito) — text answers only, like analyze.
+    // Returns structured JSON per question; the browser renders/edits it and
+    // prints the PDF. Google-only (reads student answers).
+    if (action === "generateCorrection") {
+      if (who.via !== "google") {
+        return json({ error: "google_required", message: "Gerar correção exige login com Google." }, 403);
+      }
+      const quiz = await getQuiz(p.quizId);
+      if (!quiz) return json({ error: "Quiz not found" }, 404);
+
+      const res = await db(
+        `submissions?quiz_id=eq.${encodeURIComponent(p.quizId)}` +
+        `&select=student_email,student_name,question_id,answer,created_at&order=created_at`,
+      );
+      if (!res.ok) return json({ error: "Falha ao ler respostas" }, 500);
+      const rows = await res.json();
+      const latest: Record<string, Record<string, string>> = {};
+      for (const r of rows) {
+        const w2 = ((r.student_email || r.student_name || "anon") as string).toLowerCase();
+        (latest[w2] ??= {})[r.question_id] = r.answer;
+      }
+      const byQ: Record<string, string[]> = {};
+      for (const w2 in latest) for (const qid in latest[w2]) (byQ[qid] ??= []).push(latest[w2][qid]);
+      const studentCount = Object.keys(latest).length;
+
+      const orderedQ: string[] = (quiz.questions || []).map((q: any) => q.id);
+      const qmap: Record<string, string> = {};
+      for (const q of (quiz.questions || [])) qmap[q.id] = q.prompt;
+
+      const BASE =
+        "Você é um assistente pedagógico do curso DCC638 (Introdução à Lógica Computacional), " +
+        "em português formal. Gere uma CORREÇÃO (gabarito comentado) voltada aos ALUNOS. Para CADA " +
+        "questão produza: (1) \"solucao\": a resposta curta e CORRETA (concisa; mostre passos só " +
+        "quando essenciais); (2) \"nota_tipo\": \"erro\" se houver um erro claro e recorrente nas " +
+        "respostas, senão \"dica\"; (3) \"nota\": um bloco CURTO com a MENSAGEM PEDAGÓGICA PRINCIPAL " +
+        "da questão — o que o aluno deve LEMBRAR dela. A nota NÃO é análise estatística: NÃO diga " +
+        "quantos alunos acertaram ou erraram; foque no conceito (ou no erro conceitual) de forma " +
+        "clara e concisa. Escreva os símbolos matemáticos em UNICODE (∀ ∃ ¬ ∧ ∨ → ↔ ≡ ⊕ ∈ ≥ ≤ ≠), " +
+        "NUNCA LaTeX nem cifrões. Use \"demonstração/demonstrar\", nunca \"prova/provar\". Seja conciso.";
+
+      let prompt = BASE + "\n";
+      if (typeof p.instructions === "string" && p.instructions.trim()) {
+        prompt += `\nInstruções adicionais do professor (siga-as):\n${p.instructions.trim().slice(0, 4000)}\n`;
+      }
+      if (Array.isArray(p.previous) && p.previous.length) {
+        prompt += "\nVersão anterior (refine conforme as instruções; mantenha o que estiver bom):\n" +
+          JSON.stringify(p.previous).slice(0, 12000) + "\n";
+      }
+      prompt += "\nQuestões e respostas dos alunos:\n";
+      for (const qid of orderedQ) {
+        prompt += `\n### ${qid}\nEnunciado:\n${qmap[qid]}\n`;
+        const answers = byQ[qid] || [];
+        prompt += `Respostas (${answers.length}):\n`;
+        for (const a of answers.slice(0, 150)) prompt += `- ${String(a).replace(/\s+/g, " ").slice(0, 700)}\n`;
+      }
+
+      const geminiKey = Deno.env.get("GEMINI_API_KEY");
+      if (!geminiKey) return json({ error: "GEMINI_API_KEY não configurada" }, 500);
+      const model = Deno.env.get("GEMINI_MODEL") || "gemini-flash-latest";
+      const schema = {
+        type: "object",
+        properties: {
+          questions: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                solucao: { type: "string" },
+                nota_tipo: { type: "string", enum: ["dica", "erro"] },
+                nota: { type: "string" },
+              },
+              required: ["id", "solucao", "nota_tipo", "nota"],
+            },
+          },
+        },
+        required: ["questions"],
+      };
+      const gres = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.3, maxOutputTokens: 4096,
+              responseMimeType: "application/json", responseSchema: schema,
+            },
+          }),
+        },
+      );
+      if (!gres.ok) {
+        const detail = (await gres.text()).slice(0, 300);
+        return json({ error: "Falha ao gerar correção (LLM)", detail }, 502);
+      }
+      const gdata = await gres.json();
+      const rawText = (gdata?.candidates?.[0]?.content?.parts || []).map((pt: any) => pt.text || "").join("").trim();
+      let parsed: any = null;
+      try { parsed = JSON.parse(rawText); } catch { /* leave null */ }
+      const byId: Record<string, any> = {};
+      for (const q of (parsed?.questions || [])) if (q && q.id) byId[q.id] = q;
+
+      const questions = orderedQ.map((qid) => ({
+        id: qid,
+        enunciado: qmap[qid] || "",
+        solucao: byId[qid]?.solucao || "",
+        nota_tipo: byId[qid]?.nota_tipo === "erro" ? "erro" : "dica",
+        nota: byId[qid]?.nota || "",
+      }));
+      return json({ ok: true, title: quiz.title, questions, students: studentCount }, 200);
     }
 
     if (action === "saveQuiz") {
