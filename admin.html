@@ -453,6 +453,29 @@
     // ---------- auto-correction (LLM draft -> editable -> print PDF) ----------
     let CORR = null; // { quizId, title, questions:[{id,enunciado,solucao,nota_tipo,nota}] }
 
+    // The model is asked for Unicode math but sometimes emits LaTeX (\neg, \to…);
+    // normalize the generated fields so they render cleanly (enunciado is left
+    // alone — it's the stored prompt and goes through KaTeX).
+    const TEX2UNI = [
+      [/\\Leftrightarrow/g, "⇔"], [/\\Rightarrow/g, "⇒"], [/\\leftrightarrow/g, "↔"],
+      [/\\rightarrow/g, "→"], [/\\iff/g, "↔"], [/\\implies/g, "⇒"], [/\\to\b/g, "→"],
+      [/\\forall/g, "∀"], [/\\exists/g, "∃"], [/\\neg/g, "¬"], [/\\lnot/g, "¬"],
+      [/\\land/g, "∧"], [/\\wedge/g, "∧"], [/\\lor/g, "∨"], [/\\vee/g, "∨"], [/\\oplus/g, "⊕"],
+      [/\\equiv/g, "≡"], [/\\notin/g, "∉"], [/\\in\b/g, "∈"],
+      [/\\geq/g, "≥"], [/\\ge\b/g, "≥"], [/\\leq/g, "≤"], [/\\le\b/g, "≤"],
+      [/\\neq/g, "≠"], [/\\ne\b/g, "≠"], [/\\times/g, "×"], [/\\cdot/g, "·"],
+      [/\\emptyset/g, "∅"], [/\\varnothing/g, "∅"],
+      [/\\mathbb\{R\}/g, "ℝ"], [/\\mathbb\{Z\}/g, "ℤ"], [/\\mathbb\{N\}/g, "ℕ"], [/\\mathbb\{Q\}/g, "ℚ"],
+      [/\\top/g, "T"], [/\\bot/g, "F"], [/\\left/g, ""], [/\\right/g, ""],
+      [/\\[,;!]/g, " "], [/\\ /g, " "],
+    ];
+    const uni = (s) => {
+      let x = String(s || "").replace(/\$([^$]+)\$/g, "$1"); // drop $…$ delimiters, keep content
+      for (const [re, ch] of TEX2UNI) x = x.replace(re, ch);
+      return x;
+    };
+    const normCorr = (qs) => (qs || []).map((q) => ({ ...q, solucao: uni(q.solucao), nota: uni(q.nota) }));
+
     async function doGenCorrection(id) {
       $("corrCard").classList.remove("hidden");
       $("corrMeta").textContent = "Gerando correção… pode levar alguns segundos.";
@@ -460,7 +483,7 @@
       $("corrCard").scrollIntoView({ behavior: "smooth" });
       const { ok, status, data } = await api({ action: "generateCorrection", quizId: id, instructions: $("corrInstr").value });
       if (!ok || !data.ok) { $("corrMeta").textContent = ""; $("corrMsg").className = "err"; $("corrMsg").textContent = invalid(status, data); return; }
-      CORR = { quizId: id, title: data.title || id, questions: data.questions || [] };
+      CORR = { quizId: id, title: data.title || id, questions: normCorr(data.questions) };
       $("corrMeta").textContent = `${CORR.questions.length} questões · ${data.students || 0} alunos · edite abaixo se quiser`;
       renderCorrEditor();
     }
@@ -506,11 +529,11 @@
       $("corrMsg").className = "mini"; $("corrMsg").textContent = "Gerando…";
       const { ok, status, data } = await api({ action: "generateCorrection", quizId: CORR.quizId, instructions: $("corrInstr").value, previous: CORR.questions });
       if (!ok || !data.ok) { $("corrMsg").className = "err"; $("corrMsg").textContent = invalid(status, data); return; }
-      CORR.questions = data.questions || []; CORR.title = data.title || CORR.title;
+      CORR.questions = normCorr(data.questions); CORR.title = data.title || CORR.title;
       $("corrMsg").textContent = ""; renderCorrEditor();
     }
 
-    const CORR_CSS = `@page{size:A4;margin:16mm}*{box-sizing:border-box}body{font-family:Georgia,"Times New Roman",serif;color:#1a1a1a;font-size:11.5pt;line-height:1.4;max-width:780px;margin:0 auto;padding:24px}header{border-bottom:2px solid #1a1a1a;padding-bottom:8px;margin-bottom:14px}h1{font-size:17pt;margin:0 0 2px}.legend{font-size:9.5pt;color:#555;font-style:italic}.q{margin:0 0 16px}h2{font-size:12.5pt;margin:0 0 5px;border-bottom:1px solid #ccc;padding-bottom:2px}.enun{background:#f5f4f1;border-left:4px solid #b9b4a7;padding:7px 12px;margin:3px 0 8px;font-size:10.6pt}.enun p{margin:0 0 6px}.sol{font-size:9pt;letter-spacing:.05em;text-transform:uppercase;color:#8a8a8a;margin:2px 0 3px}.ans{margin:0 0 6px}.ans p{margin:0 0 6px}code{font-family:"DejaVu Sans Mono","Courier New",monospace;font-size:10.3pt}.warn{background:#fbf3e6;border-left:4px solid #c07f2a;padding:7px 11px;margin-top:6px;font-size:10.5pt}.warn b{color:#8a5313}.tip{background:#eef3f7;border-left:4px solid #3b6ea5;padding:7px 11px;margin-top:6px;font-size:10.5pt}.tip b{color:#2c5580}@media print{body{padding:0}}`;
+    const CORR_CSS = `@page{size:A4;margin:16mm}*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:Georgia,"Times New Roman",serif;color:#1a1a1a;font-size:11.5pt;line-height:1.4;max-width:780px;margin:0 auto;padding:24px}header{border-bottom:2px solid #1a1a1a;padding-bottom:8px;margin-bottom:14px}h1{font-size:17pt;margin:0 0 2px}.legend{font-size:9.5pt;color:#555;font-style:italic}.q{margin:0 0 16px}h2{font-size:12.5pt;margin:0 0 5px;border-bottom:1px solid #ccc;padding-bottom:2px}.enun{background:#f5f4f1;border-left:4px solid #b9b4a7;padding:7px 12px;margin:3px 0 8px;font-size:10.6pt}.enun p{margin:0 0 6px}.sol{font-size:9pt;letter-spacing:.05em;text-transform:uppercase;color:#8a8a8a;margin:2px 0 3px}.ans{margin:0 0 6px}.ans p{margin:0 0 6px}code{font-family:"DejaVu Sans Mono","Courier New",monospace;font-size:10.3pt}.warn{background:#fbf3e6;border-left:4px solid #c07f2a;padding:7px 11px;margin-top:6px;font-size:10.5pt}.warn b{color:#8a5313}.tip{background:#eef3f7;border-left:4px solid #3b6ea5;padding:7px 11px;margin-top:6px;font-size:10.5pt}.tip b{color:#2c5580}@media print{body{padding:0}}`;
 
     function corrPrint() {
       if (!CORR || !CORR.questions.length) { $("corrMsg").className = "err"; $("corrMsg").textContent = "Nada para imprimir."; return; }
