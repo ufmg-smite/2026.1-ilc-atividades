@@ -24,7 +24,7 @@
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "content-type",
+  "Access-Control-Allow-Headers": "authorization, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -146,6 +146,51 @@ const ADMIN_WINDOW_SEC = 600;   // ...per 10 minutes, per IP
 const SUB_MAX_PER_WINDOW = 20;  // submissions...
 const SUB_WINDOW_SEC = 30;      // ...per 30 seconds, per student
 
+// ---------- staff auth (Supabase Auth session + allowlist) ----------
+// Verify a Supabase user access token (from Google login) against Supabase
+// itself (signature + expiry) and return the verified lowercase email. We
+// never trust the browser's claim of who it is.
+async function verifiedEmail(req: Request): Promise<string | null> {
+  const m = (req.headers.get("authorization") || "").match(/^Bearer\s+(.+)$/i);
+  if (!m) return null;
+  const res = await fetch(`${SUPA_URL}/auth/v1/user`, {
+    headers: { apikey: SERVICE, Authorization: `Bearer ${m[1]}` },
+  });
+  if (!res.ok) return null;
+  const u = await res.json().catch(() => null);
+  const email = (u?.email || "").toLowerCase().trim();
+  return email || null;
+}
+
+async function staffRole(email: string): Promise<string | null> {
+  const res = await db(`staff?email=eq.${encodeURIComponent(email)}&select=role`);
+  if (!res.ok) return null;
+  const rows = await res.json().catch(() => []);
+  return rows[0]?.role ?? null;
+}
+
+// { email, role } for an authenticated + allowlisted caller; { denied:true }
+// for a valid login that is NOT on the allowlist; null for no/invalid creds.
+// Accepts a Supabase session (Google) OR the legacy ADMIN_CODE (temporary
+// migration fallback -> teacher).
+async function authStaff(
+  req: Request, p: Record<string, any>,
+): Promise<{ email: string; role: string } | { denied: true } | null> {
+  const email = await verifiedEmail(req);
+  if (email) {
+    const role = await staffRole(email);
+    return role ? { email, role } : { denied: true };
+  }
+  if (p.adminCode && p.adminCode === Deno.env.get("ADMIN_CODE")) {
+    return { email: "admin-code", role: "teacher" };
+  }
+  return null;
+}
+
+// Actions that change state are teachers-only; reads (list/get/status/analyze)
+// are open to monitors too.
+const WRITE_ACTIONS = new Set(["open", "close", "saveQuiz", "renameQuiz", "setArchived"]);
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -159,15 +204,26 @@ Deno.serve(async (req) => {
 
   const action = p.action;
 
-  // ================= TEACHER =================
-  if (ADMIN_ACTIONS.has(action)) {
+  // ================= STAFF (teachers + monitors) =================
+  if (ADMIN_ACTIONS.has(action) || action === "whoami") {
     const ip = clientIp(req);
     if (await rateCount(`admin:${ip}`, ADMIN_WINDOW_SEC) >= ADMIN_MAX_FAILS) {
       return json({ error: "Muitas tentativas. Aguarde alguns minutos e tente de novo." }, 429);
     }
-    if (p.adminCode !== Deno.env.get("ADMIN_CODE")) {
-      await rateHit(`admin:${ip}`); // count only failures toward the lockout
+    const who = await authStaff(req, p);
+    if (!who) {
+      await rateHit(`admin:${ip}`); // count only failed auth toward the lockout
       return json({ error: "Invalid admin code" }, 403);
+    }
+    if ("denied" in who) {
+      // valid Google login, just not on the allowlist — not a brute-force attempt
+      return json({ error: "sem_acesso", message: "Este e-mail não tem acesso." }, 403);
+    }
+    if (action === "whoami") {
+      return json({ ok: true, email: who.email, role: who.role }, 200);
+    }
+    if (WRITE_ACTIONS.has(action) && who.role !== "teacher") {
+      return json({ error: "forbidden", message: "Ação restrita a docentes." }, 403);
     }
 
     if (action === "listQuizzes") {

@@ -47,18 +47,37 @@
 <body>
   <script>
     const FUNCTION_URL = "https://rftveyvbitiysymutdir.supabase.co/functions/v1/submit";
+    const SUPABASE_URL = "https://rftveyvbitiysymutdir.supabase.co";
+    // anon key is public by design (RLS denies data; it only signs users in)
+    const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJmdHZleXZiaXRpeXN5bXV0ZGlyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzNzczNjMsImV4cCI6MjEwMTk1MzM2M30.N1Pg5DV5S1vxx_fo6gKsYtGHoEN2xqRXEoBX58Avako";
   </script>
 
   <!-- ===== auth + quiz list ===== -->
   <div class="card">
     <h1>Painel do professor</h1>
-    <p class="sub">Crie e edite quizzes, abra/feche a sessão.</p>
-    <label>Código de admin</label>
-    <input id="admin" type="password" placeholder="ADMIN_CODE" autocomplete="off" />
-    <label style="font-size:13px;color:#5f6368;margin-top:6px;display:block;">
-      <input type="checkbox" id="rememberAdmin" style="width:auto;margin-right:6px;vertical-align:middle;">
-      Lembrar o código neste dispositivo (use apenas no seu próprio computador)
-    </label>
+    <p class="sub">Crie e edite quizzes, abra/feche a sessão, veja as respostas.</p>
+
+    <div id="loggedOut">
+      <div class="row" style="margin-top:4px;">
+        <button class="status" id="googleBtn">Entrar com Google</button>
+      </div>
+      <details style="margin-top:10px;">
+        <summary class="mini" style="cursor:pointer;">ou usar código de admin (temporário)</summary>
+        <label>Código de admin</label>
+        <input id="admin" type="password" placeholder="ADMIN_CODE" autocomplete="off" />
+        <label style="font-size:13px;color:#5f6368;margin-top:6px;display:block;">
+          <input type="checkbox" id="rememberAdmin" style="width:auto;margin-right:6px;vertical-align:middle;">
+          Lembrar o código neste dispositivo (use apenas no seu próprio computador)
+        </label>
+      </details>
+    </div>
+
+    <div id="loggedIn" class="hidden">
+      <p class="sub">Conectado como <strong id="whoEmail"></strong>
+        <span id="whoRole" class="pill on"></span>
+        <button class="ghost" id="logoutBtn" style="margin-left:8px;padding:4px 10px;">Sair</button></p>
+    </div>
+
     <div class="row">
       <button class="status" id="listBtn">Carregar quizzes</button>
       <button class="add" id="newBtn">+ Novo quiz</button>
@@ -124,14 +143,18 @@
     }
 
     async function api(payload) {
-      const res = await fetch(FUNCTION_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adminCode: $("admin").value.trim(), ...payload }),
-      });
+      const headers = { "Content-Type": "application/json" };
+      const token = await getValidToken();
+      if (token) headers["Authorization"] = "Bearer " + token;
+      const body = { ...payload };
+      const code = ($("admin") && $("admin").value.trim()) || "";
+      if (code) body.adminCode = code;
+      const res = await fetch(FUNCTION_URL, { method: "POST", headers, body: JSON.stringify(body) });
       let data = {}; try { data = await res.json(); } catch {}
       return { ok: res.ok, status: res.status, data };
     }
-    const invalid = (status, d) => status === 403 ? "Código de admin inválido." : (d.error || "Falha.");
+    const invalid = (status, d) =>
+      d.message || (status === 403 ? "Sem acesso (faça login ou verifique o código)." : (d.error || "Falha."));
     const fmt = (iso) => iso ? new Date(iso).toLocaleString() : "—";
 
     // ---------- remember admin code (opt-in, this device only) ----------
@@ -146,6 +169,95 @@
     }
     $("rememberAdmin").addEventListener("change", persistAdmin);
     $("admin").addEventListener("input", persistAdmin);
+
+    // ---------- Supabase Auth (Google login) ----------
+    const SESS_LS = "ilc-supa-session";
+    let ROLE = null; // "teacher" | "monitor" | null
+    const loadSession = () => { try { return JSON.parse(localStorage.getItem(SESS_LS) || "null"); } catch { return null; } };
+    const saveSession = (s) => localStorage.setItem(SESS_LS, JSON.stringify(s));
+    const clearSession = () => localStorage.removeItem(SESS_LS);
+
+    // After Google redirects back, tokens arrive in the URL hash — stash and strip them.
+    function captureHash() {
+      if (!location.hash || location.hash.indexOf("access_token") < 0) return;
+      const h = new URLSearchParams(location.hash.slice(1));
+      const at = h.get("access_token");
+      if (at) saveSession({
+        access_token: at, refresh_token: h.get("refresh_token"),
+        expires_at: Date.now() + (parseInt(h.get("expires_in") || "3600", 10)) * 1000,
+      });
+      history.replaceState(null, "", location.pathname + location.search);
+    }
+
+    async function getValidToken() {
+      const s = loadSession();
+      if (!s || !s.access_token) return null;
+      if (Date.now() < s.expires_at - 60000) return s.access_token;      // still fresh
+      if (!s.refresh_token) { clearSession(); return null; }
+      try {                                                              // refresh it
+        const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+          method: "POST",
+          headers: { apikey: SUPABASE_ANON, "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: s.refresh_token }),
+        });
+        if (!res.ok) { clearSession(); return null; }
+        const d = await res.json();
+        saveSession({ access_token: d.access_token, refresh_token: d.refresh_token,
+          expires_at: Date.now() + (d.expires_in || 3600) * 1000 });
+        return d.access_token;
+      } catch { return null; }
+    }
+
+    function signInGoogle() {
+      const redirect = location.origin + location.pathname;
+      location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirect)}`;
+    }
+    async function signOut() {
+      const s = loadSession();
+      if (s && s.access_token) {
+        try { await fetch(`${SUPABASE_URL}/auth/v1/logout`, { method: "POST",
+          headers: { apikey: SUPABASE_ANON, Authorization: "Bearer " + s.access_token } }); } catch {}
+      }
+      clearSession(); setAuthUI(null);
+    }
+
+    function setAuthUI(who) {
+      if (who) {
+        $("loggedOut").classList.add("hidden");
+        $("loggedIn").classList.remove("hidden");
+        $("whoEmail").textContent = who.email;
+        $("whoRole").textContent = who.role === "teacher" ? "docente" : "monitor";
+        ROLE = who.role;
+      } else {
+        $("loggedIn").classList.add("hidden");
+        $("loggedOut").classList.remove("hidden");
+        ROLE = null;
+      }
+      applyRoleUI();
+    }
+    // teachers (or the legacy admin-code fallback) may change state; monitors are read-only.
+    function canWrite() {
+      return ROLE === "teacher" || (!ROLE && !!($("admin") && $("admin").value.trim()));
+    }
+    function applyRoleUI() { $("newBtn").style.display = canWrite() ? "" : "none"; }
+
+    async function initAuth() {
+      captureHash();
+      const t = await getValidToken();
+      if (!t) { setAuthUI(null); return; }
+      const { ok, status, data } = await api({ action: "whoami" });
+      if (ok && data.ok) { setAuthUI({ email: data.email, role: data.role }); loadList(); }
+      else if (status === 403) {
+        clearSession(); setAuthUI(null);
+        $("msg").className = "err";
+        $("msg").textContent = data.message || "Este e-mail (Google) não tem acesso. Fale com o docente.";
+      } else { setAuthUI(null); }
+    }
+
+    $("googleBtn").addEventListener("click", signInGoogle);
+    $("logoutBtn").addEventListener("click", signOut);
+    $("admin").addEventListener("input", applyRoleUI);
+    initAuth();
 
     // ---------- quiz list ----------
     $("listBtn").addEventListener("click", loadList);
@@ -170,17 +282,18 @@
           `<td>${pill}${(!q.archived && q.isOpen) ? '<br><span class="mini">fecha ' + fmt(q.endsAt) + '</span>' : ''}</td>` +
           `<td></td>`;
         const actions = tr.children[2];
+        const cw = canWrite();
         if (!q.archived) {
-          actions.appendChild(mkBtn("Abrir", "open", () => doOpen(q.id)));
-          actions.appendChild(mkBtn("Fechar", "close", () => doClose(q.id)));
+          if (cw) actions.appendChild(mkBtn("Abrir", "open", () => doOpen(q.id)));
+          if (cw) actions.appendChild(mkBtn("Fechar", "close", () => doClose(q.id)));
           actions.appendChild(mkBtn("Status", "status", () => doStatus(q.id)));
-          actions.appendChild(mkBtn("Editar", "edit", () => openEditor(q.id)));
+          if (cw) actions.appendChild(mkBtn("Editar", "edit", () => openEditor(q.id)));
           actions.appendChild(mkBtn("Analisar", "status", () => doAnalyze(q.id)));
-          actions.appendChild(mkBtn("Arquivar", "close", () => doArchive(q.id, true)));
+          if (cw) actions.appendChild(mkBtn("Arquivar", "close", () => doArchive(q.id, true)));
         } else {
           actions.appendChild(mkBtn("Analisar", "status", () => doAnalyze(q.id)));
-          actions.appendChild(mkBtn("Editar", "edit", () => openEditor(q.id)));
-          actions.appendChild(mkBtn("Restaurar", "open", () => doArchive(q.id, false)));
+          if (cw) actions.appendChild(mkBtn("Editar", "edit", () => openEditor(q.id)));
+          if (cw) actions.appendChild(mkBtn("Restaurar", "open", () => doArchive(q.id, false)));
         }
         tb.appendChild(tr);
       });
