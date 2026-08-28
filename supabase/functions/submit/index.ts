@@ -5,20 +5,21 @@
 //    { action:"load" }                      -> the quiz currently OPEN
 //    { action:"submit", quizId, studentName, studentEmail, questionId, answer }
 //
-//  TEACHER actions (need ADMIN_CODE):
-//    { action:"listQuizzes", adminCode }
-//    { action:"getQuiz",     adminCode, quizId }
-//    { action:"saveQuiz",    adminCode, quizId, title, description, questions:[{id,prompt}] }
-//    { action:"open",        adminCode, quizId, durationMinutes? }   // closes all others
-//    { action:"close",       adminCode, quizId }
-//    { action:"status",      adminCode, quizId }
+//  STAFF actions (need a Google session; email must be in the `staff` allowlist):
+//  (all carry Authorization: Bearer <supabase session token>)
+//    { action:"listQuizzes" }
+//    { action:"getQuiz",  quizId }
+//    { action:"saveQuiz", quizId, title, description, questions:[{id,prompt}] }
+//    { action:"open",     quizId, durationMinutes? }   // closes all others
+//    { action:"close",    quizId }
+//    { action:"status",   quizId }
 //
 //  Questions live in the `quizzes` table, so they can be edited from the
 //  admin panel without touching the page. Each quiz is its own row, so
 //  the whole semester's history is preserved. Only ONE quiz is open at a
 //  time; the student page asks for "the open quiz" and needs no quiz id.
 //
-//  Secrets (Edge Functions -> Secrets): ADMIN_CODE, GEMINI_API_KEY (optional GEMINI_MODEL).
+//  Secrets (Edge Functions -> Secrets): GEMINI_API_KEY (optional GEMINI_MODEL).
 //  SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are injected automatically.
 // ============================================================
 
@@ -170,21 +171,15 @@ async function staffRole(email: string): Promise<string | null> {
 }
 
 // { email, role } for an authenticated + allowlisted caller; { denied:true }
-// for a valid login that is NOT on the allowlist; null for no/invalid creds.
-// Accepts a Supabase session (Google) OR the legacy ADMIN_CODE (temporary
-// migration fallback -> teacher).
+// for a valid Google login that is NOT on the allowlist; null for no/invalid
+// session.
 async function authStaff(
-  req: Request, p: Record<string, any>,
-): Promise<{ email: string; role: string; via: "google" | "code" } | { denied: true } | null> {
+  req: Request,
+): Promise<{ email: string; role: string } | { denied: true } | null> {
   const email = await verifiedEmail(req);
-  if (email) {
-    const role = await staffRole(email);
-    return role ? { email, role, via: "google" } : { denied: true };
-  }
-  if (p.adminCode && p.adminCode === Deno.env.get("ADMIN_CODE")) {
-    return { email: "admin-code", role: "teacher", via: "code" };
-  }
-  return null;
+  if (!email) return null;                    // no valid Google session
+  const role = await staffRole(email);
+  return role ? { email, role } : { denied: true };
 }
 
 // Actions that change state are teachers-only; reads (list/get/status/analyze)
@@ -210,10 +205,10 @@ Deno.serve(async (req) => {
     if (await rateCount(`admin:${ip}`, ADMIN_WINDOW_SEC) >= ADMIN_MAX_FAILS) {
       return json({ error: "Muitas tentativas. Aguarde alguns minutos e tente de novo." }, 429);
     }
-    const who = await authStaff(req, p);
+    const who = await authStaff(req);
     if (!who) {
       await rateHit(`admin:${ip}`); // count only failed auth toward the lockout
-      return json({ error: "Invalid admin code" }, 403);
+      return json({ error: "unauthenticated", message: "Faça login com a sua conta Google." }, 403);
     }
     if ("denied" in who) {
       // valid Google login, just not on the allowlist — not a brute-force attempt
@@ -257,13 +252,9 @@ Deno.serve(async (req) => {
       }, 200);
     }
 
-    // Full answer export (text + photo signed URLs). Reading raw student data
-    // requires a verified Google identity — the ADMIN_CODE path is refused.
+    // Full answer export (text + photo signed URLs). Staff are always Google-
+    // authenticated (verified identity + allowlist) before reaching here.
     if (action === "getAnswers") {
-      if (who.via !== "google") {
-        return json({ error: "google_required",
-          message: "Baixar respostas exige login com Google (não pelo código de admin)." }, 403);
-      }
       const quizId = p.quizId;
       if (!quizId) return json({ error: "quizId obrigatório" }, 400);
 
@@ -305,9 +296,6 @@ Deno.serve(async (req) => {
     // Returns structured JSON per question; the browser renders/edits it and
     // prints the PDF. Google-only (reads student answers).
     if (action === "generateCorrection") {
-      if (who.via !== "google") {
-        return json({ error: "google_required", message: "Gerar correção exige login com Google." }, 403);
-      }
       const quiz = await getQuiz(p.quizId);
       if (!quiz) return json({ error: "Quiz not found" }, 404);
 

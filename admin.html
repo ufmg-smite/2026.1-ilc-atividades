@@ -62,15 +62,7 @@
       <div class="row" style="margin-top:4px;">
         <button class="status" id="googleBtn">Entrar com Google</button>
       </div>
-      <details style="margin-top:10px;">
-        <summary class="mini" style="cursor:pointer;">ou usar código de admin (temporário)</summary>
-        <label>Código de admin</label>
-        <input id="admin" type="password" placeholder="ADMIN_CODE" autocomplete="off" />
-        <label style="font-size:13px;color:#5f6368;margin-top:6px;display:block;">
-          <input type="checkbox" id="rememberAdmin" style="width:auto;margin-right:6px;vertical-align:middle;">
-          Lembrar o código neste dispositivo (use apenas no seu próprio computador)
-        </label>
-      </details>
+      <p class="hint">Acesso restrito à equipe (docentes e monitores). Entre com a sua conta Google autorizada.</p>
     </div>
 
     <div id="loggedIn" class="hidden">
@@ -166,29 +158,13 @@
       const headers = { "Content-Type": "application/json" };
       const token = await getValidToken();
       if (token) headers["Authorization"] = "Bearer " + token;
-      const body = { ...payload };
-      const code = ($("admin") && $("admin").value.trim()) || "";
-      if (code) body.adminCode = code;
-      const res = await fetch(FUNCTION_URL, { method: "POST", headers, body: JSON.stringify(body) });
+      const res = await fetch(FUNCTION_URL, { method: "POST", headers, body: JSON.stringify(payload) });
       let data = {}; try { data = await res.json(); } catch {}
       return { ok: res.ok, status: res.status, data };
     }
     const invalid = (status, d) =>
-      d.message || (status === 403 ? "Sem acesso (faça login ou verifique o código)." : (d.error || "Falha."));
+      d.message || (status === 403 ? "Sem acesso. Entre com a sua conta Google autorizada." : (d.error || "Falha."));
     const fmt = (iso) => iso ? new Date(iso).toLocaleString() : "—";
-
-    // ---------- remember admin code (opt-in, this device only) ----------
-    const ADMIN_LS = "ilc-admin-code";
-    (function () {
-      const saved = localStorage.getItem(ADMIN_LS);
-      if (saved) { $("admin").value = saved; $("rememberAdmin").checked = true; }
-    })();
-    function persistAdmin() {
-      if ($("rememberAdmin").checked) localStorage.setItem(ADMIN_LS, $("admin").value.trim());
-      else localStorage.removeItem(ADMIN_LS);
-    }
-    $("rememberAdmin").addEventListener("change", persistAdmin);
-    $("admin").addEventListener("input", persistAdmin);
 
     // ---------- Supabase Auth (Google login) ----------
     const SESS_LS = "ilc-supa-session";
@@ -255,10 +231,8 @@
       }
       applyRoleUI();
     }
-    // teachers (or the legacy admin-code fallback) may change state; monitors are read-only.
-    function canWrite() {
-      return ROLE === "teacher" || (!ROLE && !!($("admin") && $("admin").value.trim()));
-    }
+    // teachers may change state; monitors are read-only.
+    function canWrite() { return ROLE === "teacher"; }
     function applyRoleUI() { $("newBtn").style.display = canWrite() ? "" : "none"; }
 
     async function initAuth() {
@@ -276,7 +250,6 @@
 
     $("googleBtn").addEventListener("click", signInGoogle);
     $("logoutBtn").addEventListener("click", signOut);
-    $("admin").addEventListener("input", applyRoleUI);
     initAuth();
 
     // ---------- quiz list ----------
