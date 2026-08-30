@@ -237,8 +237,14 @@ def cmd_transcribe(a):
             texts.append(out.get("transcription") or "")
             legible = legible and bool(out.get("legible", True))
 
-        s.update(r["id"], transcription="\n\n".join(t for t in texts if t).strip(),
-                 legible=int(legible), model_transc=a.model)
+        text = "\n\n".join(t for t in texts if t).strip()
+        # A student may type part of the answer and photograph the rest — the
+        # answer is both. Grading the photo alone made the model report
+        # questions as unanswered that the student had in fact answered.
+        typed = (r["typed_answer"] or "").strip()
+        if typed and text and not text.startswith(typed):
+            text = f"{typed}\n\n--- foto anexada ---\n{text}"
+        s.update(r["id"], transcription=text, legible=int(legible), model_transc=a.model)
         if i % 10 == 0:
             rate = (time.time() - t0) / i
             log(f"  {i}/{len(rows)}  (~{rate:.1f}s cada, faltam ~{rate * (len(rows) - i) / 60:.0f} min)")
@@ -350,7 +356,16 @@ def cmd_push(a):
             supa.upload(local, obj, content_type="image/webp")
             paths.append(obj)
 
-        if not a.proposals_only:
+        if a.proposals_only:
+            # item and images are already up; the text may have changed though
+            supa.patch(
+                f"correction_items?run_id=eq.{supa.q(a.run)}"
+                f"&question_id=eq.{supa.q(r['question_id'])}"
+                f"&student_key=eq.{supa.q(r['student_key'])}",
+                {"transcription": r["transcription"] or "",
+                 "cluster_key": r["cluster_key"]},
+            )
+        else:
             supa.post(
             "correction_items?on_conflict=run_id,question_id,student_key",
             [{
