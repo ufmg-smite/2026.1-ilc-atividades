@@ -417,11 +417,13 @@
       plab.className = "fld"; plab.textContent = "Fotos (opcional)";
       const phint = document.createElement("div");
       phint.className = "hint";
-      phint.textContent = "Para respostas manuscritas — anexe várias (uma por página). " +
-        "Elas são enviadas quando você clica em “Enviar resposta”.";
+      phint.textContent = "Para respostas manuscritas — tire uma foto ou escolha imagens já salvas " +
+        "(uma por página). Elas são enviadas quando você clica em “Enviar resposta”.";
       const fileInput = document.createElement("input");
       fileInput.type = "file"; fileInput.accept = "image/*";
-      fileInput.setAttribute("capture", "environment"); fileInput.multiple = true;
+      // No `capture` attribute: on phones this shows câmera OU galeria/arquivos,
+      // so students can upload photos they took outside the platform.
+      fileInput.multiple = true;
       const pstatus = document.createElement("span");
       pstatus.className = "save-state";
       const thumbs = document.createElement("div");
