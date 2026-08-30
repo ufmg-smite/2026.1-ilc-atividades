@@ -325,13 +325,6 @@
 
   function say(text, cls) { const m = $("msg"); m.textContent = text || ""; m.className = cls || ""; }
 
-  // Grow a textarea to fit its content, between its rows= floor and a cap that
-  // keeps the criteria list on screen. Called on load and while typing.
-  function autosize(el, maxPx) {
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight + 2, maxPx) + "px";
-  }
-
   // ---------- state ----------
   let RUN = null, QID = null, ITEMS = [], CRIT = [], QUESTION = null, IDX = 0;
   let score = 0, met = {}, manual = false, dirty = false;
@@ -423,8 +416,6 @@
 
     renderCriteria();
     $("transc").value = it.transcription || it.typedAnswer || "";
-    autosize($("justif"), 340);
-    autosize($("transc"), 300);
     $("transcView").innerHTML = renderRich($("transc").value);
     renderScans();
     renderSidebar();
@@ -759,11 +750,7 @@
     const row = e.target.closest(".srow");
     if (row) jump(parseInt(row.dataset.i, 10));
   });
-  $("transc").addEventListener("input", () => {
-    $("transcView").innerHTML = renderRich($("transc").value);
-    autosize($("transc"), 300);
-  });
-  $("justif").addEventListener("input", () => autosize($("justif"), 340));
+  $("transc").addEventListener("input", () => { $("transcView").innerHTML = renderRich($("transc").value); });
 
   // ---------- boot ----------
   (async function init() {
