@@ -15,10 +15,10 @@ to this script so you don't retype them:
     SUPABASE_SERVICE_ROLE_KEY="eyJ...service_role key..."
 
 Usage:
-    python3 export.py <quiz-id>              # -> <quiz-id>_export/  (git-ignored)
+    python3 export.py <quiz-id>              # -> dados/exports/<quiz-id>_export/
     python3 export.py <quiz-id> -o pasta     # custom output folder
 
-Safe to run inside the repo: `*_export/` is git-ignored, and the script WARNS if
+Safe to run inside the repo: `dados/` is git-ignored, and the script WARNS if
 the chosen output folder is not ignored (so student data is never committed).
 
 Output folder contents:
@@ -66,14 +66,14 @@ def warn_if_not_ignored(outdir):
         )
         if inside.returncode != 0 or inside.stdout.strip() != "true":
             return  # not a git repo — nothing to guard against
-        # trailing slash: `*_export/` is a directory pattern, and the folder may
-        # not exist yet — the slash makes the match work either way.
+        # trailing slash: these are directory patterns, and the folder may not
+        # exist yet — the slash makes the match work either way.
         chk = subprocess.run(["git", "check-ignore", "-q", outdir.rstrip("/") + "/"], capture_output=True)
         if chk.returncode != 0:  # 0 = ignored; non-zero = NOT ignored
             print(
                 f"\n  ⚠  AVISO: a pasta '{outdir}' NÃO está no .gitignore.\n"
                 f"     Ela contém dados de alunos — NÃO faça commit dela.\n"
-                f"     Adicione um padrão como '*_export/' ao .gitignore.\n",
+                f"     Coloque-a em dados/ ou adicione um padrão ao .gitignore.\n",
                 file=sys.stderr,
             )
     except FileNotFoundError:
@@ -101,7 +101,8 @@ def main():
     ap = argparse.ArgumentParser(
         description="Exporta as respostas (texto + fotos) de um quiz do Supabase.")
     ap.add_argument("quiz_id", help="id do quiz, como aparece no painel do professor")
-    ap.add_argument("-o", "--out", help="pasta de saída (padrão: <quiz-id>_export)")
+    ap.add_argument("-o", "--out",
+                    help="pasta de saída (padrão: dados/exports/<quiz-id>_export)")
     ap.add_argument("--env", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"),
                     help="arquivo .env com as credenciais (padrão: .env ao lado do script)")
     args = ap.parse_args()
@@ -115,7 +116,10 @@ def main():
                  "(variáveis de ambiente ou um arquivo .env).")
 
     quiz_id = args.quiz_id
-    outdir = args.out or f"{quiz_id}_export"
+    # Script-relative, not cwd-relative: all course data belongs under dados/
+    # regardless of where the script is invoked from.
+    outdir = args.out or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "dados", "exports", f"{quiz_id}_export")
     warn_if_not_ignored(outdir)
 
     # 1. submissions — keep the latest per (student, question)

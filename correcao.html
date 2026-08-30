@@ -1,0 +1,774 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Correção — DCC638</title>
+  <!-- Vendored locally (same-origin) — see lib/. Same pinned versions as admin.html. -->
+  <link rel="stylesheet" href="lib/katex/katex.min.css" />
+  <script src="lib/katex/katex.min.js"></script>
+  <script src="lib/marked.min.js"></script>
+  <script src="lib/purify.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { font-family: system-ui, -apple-system, Roboto, Arial, sans-serif;
+           background:#f1f3f4; margin:0; color:#202124; font-size:14px;
+           display:flex; flex-direction:column; overflow:hidden; }
+
+    /* ---------- top bar ---------- */
+    header { background:#fff; border-bottom:1px solid #dadce0; padding:8px 14px;
+             display:flex; gap:12px; align-items:center; flex-wrap:wrap; flex:0 0 auto; }
+    header h1 { font-size:16px; font-weight:500; margin:0 10px 0 0; }
+    select, header input { padding:6px 8px; border:1px solid #dadce0; border-radius:6px; font:inherit; }
+    button { border:0; border-radius:6px; padding:7px 13px; font-size:13px; cursor:pointer; color:#fff; background:#1a73e8; }
+    button.ghost { background:#fff; color:#1a73e8; border:1px solid #1a73e8; }
+    button.grey { background:#5f6368; } button.green { background:#188038; } button.red { background:#d93025; }
+    button:disabled { opacity:.45; cursor:default; }
+    .spacer { flex:1; }
+    .who { font-size:12px; color:#5f6368; }
+    .prog { font-size:13px; color:#5f6368; font-variant-numeric: tabular-nums; }
+    .prog b { color:#202124; }
+
+    /* ---------- 3-column workspace ---------- */
+    main { flex:1; display:flex; min-height:0; }
+    #sidebar { width:230px; flex:0 0 auto; background:#fff; border-right:1px solid #dadce0;
+               overflow-y:auto; }
+    #sidebar.hidden { display:none; }
+    .srow { padding:6px 10px; border-bottom:1px solid #f1f3f4; cursor:pointer;
+            display:flex; gap:6px; align-items:baseline; font-size:12.5px; }
+    .srow:hover { background:#f8f9fa; }
+    .srow.cur { background:#e8f0fe; box-shadow: inset 3px 0 0 #1a73e8; }
+    .srow .nm { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .srow .sc { font-variant-numeric: tabular-nums; color:#5f6368; }
+    .srow.done .sc { color:#188038; font-weight:600; }
+    .srow.clus { border-left:3px solid #fbbc04; }
+
+    #scans { flex:1.15; min-width:0; background:#3c4043; overflow:auto; position:relative;
+             display:flex; flex-direction:column; align-items:center; padding:10px; gap:10px; }
+    #scans img { max-width:100%; background:#fff; transform-origin: center center; }
+    #scans .noimg { color:#bdc1c6; margin:auto; font-size:13px; text-align:center; padding:20px; }
+    .imgtools { position:sticky; top:0; align-self:flex-end; display:flex; gap:6px; z-index:5; }
+    .imgtools button { padding:4px 9px; font-size:12px; background:#5f6368cc; }
+
+    #panel { flex:1; min-width:340px; overflow-y:auto; padding:12px 14px 40px; background:#fff;
+             border-left:1px solid #dadce0; }
+    .sect { margin-bottom:14px; }
+    .sect > label { display:block; font-size:11px; letter-spacing:.04em; text-transform:uppercase;
+                    color:#5f6368; margin-bottom:5px; }
+    textarea { width:100%; padding:8px; border:1px solid #dadce0; border-radius:6px; font:inherit;
+               font-family: ui-monospace, Menlo, Consolas, monospace; font-size:13px; line-height:1.55;
+               resize:vertical; }
+    textarea:focus { outline:2px solid #1a73e8; outline-offset:-1px; border-color:#1a73e8; }
+    .rendered { border:1px dashed #dadce0; border-radius:6px; padding:7px 9px; background:#fafafa;
+                font-size:14px; overflow-x:auto; min-height:34px; }
+    .rendered p { margin:0 0 5px; } .rendered p:last-child { margin:0; }
+
+    .scorebar { display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:8px;
+                background:#f8f9fa; border:1px solid #dadce0; }
+    .scorebig { font-size:30px; font-weight:600; font-variant-numeric: tabular-nums; line-height:1; }
+    .scoremax { font-size:15px; color:#5f6368; }
+    .badge { font-size:11px; padding:2px 8px; border-radius:10px; background:#eee; color:#5f6368; }
+    .badge.done { background:#e6f4ea; color:#188038; } .badge.man { background:#fef7e0; color:#b06000; }
+
+    table.crit { width:100%; border-collapse:collapse; }
+    table.crit td { border-top:1px solid #f1f3f4; padding:5px 4px; vertical-align:top; font-size:13px; }
+    table.crit td.k { width:24px; color:#9aa0a6; font-size:11px; text-align:center; padding-top:8px; }
+    table.crit td.p { width:44px; text-align:right; color:#5f6368; font-variant-numeric: tabular-nums; }
+    table.crit tr.met td.p { color:#188038; font-weight:600; }
+    table.crit .lb { cursor:pointer; }
+    table.crit .dt { color:#5f6368; font-size:11.5px; }
+    table.crit .note { color:#b06000; font-size:11.5px; font-style:italic; }
+
+    .hint { font-size:11.5px; color:#5f6368; }
+    .err { color:#d93025; } .ok { color:#188038; }
+    #msg { min-height:16px; font-size:12.5px; margin-top:6px; white-space:pre-wrap; }
+
+    /* ---------- overlays ---------- */
+    .overlay { position:fixed; inset:0; background:#0009; display:flex; align-items:center;
+               justify-content:center; z-index:50; padding:20px; }
+    .overlay.hidden, .hidden { display:none; }
+    .modal { background:#fff; border-radius:10px; max-width:900px; width:100%; max-height:88vh;
+             overflow-y:auto; padding:20px 22px; }
+    .modal h2 { font-size:17px; font-weight:500; margin:0 0 12px; }
+    .modal table { width:100%; border-collapse:collapse; }
+    .modal table th { text-align:left; font-size:11px; text-transform:uppercase; color:#5f6368;
+                      padding:4px; font-weight:500; }
+    .modal table td { padding:3px 4px; vertical-align:top; }
+    .modal input, .modal textarea { width:100%; padding:6px 7px; border:1px solid #dadce0;
+                                    border-radius:5px; font:inherit; font-size:13px; }
+    .modal input.pts { text-align:right; }
+    kbd { background:#f1f3f4; border:1px solid #dadce0; border-bottom-width:2px; border-radius:4px;
+          padding:1px 5px; font-family:ui-monospace, Menlo, monospace; font-size:11.5px; }
+    .keys { display:grid; grid-template-columns:auto 1fr; gap:6px 12px; align-items:baseline; font-size:13px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Correção</h1>
+  <div id="loggedOut">
+    <button onclick="signInGoogle()">Entrar com Google</button>
+  </div>
+  <div id="loggedIn" class="hidden" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <select id="runSel" onchange="onRunChange()"></select>
+    <select id="qSel" onchange="loadQueue()"></select>
+    <select id="orderSel" onchange="loadQueue()" title="Ordem da fila">
+      <option value="default">agrupado por resposta</option>
+      <option value="spread">amostra variada (calibrar)</option>
+    </select>
+    <span class="prog" id="prog"></span>
+    <span class="spacer"></span>
+    <button class="ghost" onclick="openRubric()" title="b">Barema</button>
+    <button class="ghost" onclick="exportCsv()">CSV</button>
+    <button class="ghost" onclick="openHelp()" title="?">Teclas</button>
+    <span class="who" id="who"></span>
+    <button class="grey" onclick="signOut()">Sair</button>
+  </div>
+</header>
+
+<main>
+  <div id="sidebar"></div>
+
+  <div id="scans">
+    <div class="imgtools">
+      <button onclick="rotate()" title="r">↻</button>
+      <button onclick="zoom(0.2)">+</button>
+      <button onclick="zoom(-0.2)">−</button>
+    </div>
+    <div id="scanBody"></div>
+  </div>
+
+  <div id="panel">
+    <div class="sect">
+      <label>Aluno</label>
+      <div id="student" style="font-size:15px;font-weight:500"></div>
+      <div class="hint" id="clusterInfo"></div>
+    </div>
+
+    <div class="sect">
+      <label>Nota proposta <span class="hint">(↑ ↓ ajusta · Enter confirma)</span></label>
+      <div class="scorebar">
+        <span class="scorebig" id="scoreVal">—</span>
+        <span class="scoremax" id="scoreMax"></span>
+        <span class="spacer"></span>
+        <span class="badge" id="stateBadge">pendente</span>
+      </div>
+      <div id="msg"></div>
+    </div>
+
+    <div class="sect">
+      <label>Critérios <span class="hint">(1–9 alterna)</span></label>
+      <table class="crit" id="critTable"></table>
+    </div>
+
+    <div class="sect">
+      <label>Justificativa <span class="hint">(e edita · Enter confirma · Shift+Enter quebra linha)</span></label>
+      <textarea id="justif" rows="4"></textarea>
+    </div>
+
+    <div class="sect">
+      <label>Transcrição <span class="hint">(t edita · Enter salva e re-avalia · g re-avalia)</span></label>
+      <textarea id="transc" rows="6"></textarea>
+      <div class="rendered" id="transcView"></div>
+    </div>
+
+    <div class="sect">
+      <label>Enunciado</label>
+      <div class="rendered" id="promptView"></div>
+    </div>
+  </div>
+</main>
+
+<!-- ===== barème editor ===== -->
+<div class="overlay hidden" id="rubricOv">
+  <div class="modal">
+    <h2>Barema — <span id="rubQ"></span></h2>
+    <p class="hint">Mudar os PONTOS re-precifica na hora todas as respostas ainda pendentes, sem
+      chamar o modelo. Respostas já corrigidas por uma pessoa mantêm a nota dada — a decisão humana
+      é definitiva. Um critério novo vale só daqui para a frente.</p>
+
+    <div class="sect" style="margin-top:14px">
+      <label>Resposta de referência (gabarito)</label>
+      <textarea id="rubRef" rows="3"></textarea>
+    </div>
+    <div class="sect">
+      <label>Orientações para o modelo (opcional)</label>
+      <textarea id="rubGuide" rows="2"></textarea>
+    </div>
+
+    <table id="rubTable">
+      <thead><tr><th style="width:150px">chave</th><th>rótulo</th><th>o que ganha o ponto</th>
+        <th style="width:70px">pontos</th><th style="width:30px"></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="row" style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap">
+      <button class="ghost" onclick="addCrit()">+ critério</button>
+      <button class="ghost" onclick="proposeRubric()">Propor barema com IA</button>
+      <span class="hint">Total: <b id="rubTotal">0</b> pontos</span>
+      <span class="spacer" style="flex:1"></span>
+      <button class="grey" onclick="closeRubric()">Cancelar</button>
+      <button class="green" onclick="saveRubric()">Salvar barema</button>
+    </div>
+    <div id="rubMsg" style="font-size:12.5px;margin-top:8px"></div>
+  </div>
+</div>
+
+<!-- ===== keyboard help ===== -->
+<div class="overlay hidden" id="helpOv" onclick="closeHelp()">
+  <div class="modal" style="max-width:520px" onclick="event.stopPropagation()">
+    <h2>Teclas</h2>
+    <div class="keys">
+      <kbd>↑</kbd><span>aumenta a nota em 0,5</span>
+      <kbd>↓</kbd><span>diminui a nota em 0,5</span>
+      <kbd>←</kbd><span>resposta anterior (não confirma)</span>
+      <kbd>→</kbd><span>próxima resposta (não confirma)</span>
+      <kbd>Enter</kbd><span>confirma a nota e avança</span>
+      <kbd>1</kbd>…<kbd>9</kbd><span>liga/desliga um critério (recalcula a nota)</span>
+      <kbd>e</kbd><span>editar a justificativa</span>
+      <kbd>t</kbd><span>editar a transcrição</span>
+      <kbd>g</kbd><span>re-avaliar esta resposta com o modelo</span>
+      <kbd>b</kbd><span>abrir o barema</span>
+      <kbd>r</kbd><span>girar a imagem 90°</span>
+      <kbd>s</kbd><span>mostrar/ocultar a lista de alunos</span>
+      <kbd>Esc</kbd><span>sair do campo de texto / fechar</span>
+      <kbd>?</kbd><span>esta ajuda</span>
+    </div>
+    <p class="hint" style="margin-top:14px">Dentro de um campo de texto as setas movem o cursor
+      normalmente; <kbd>Enter</kbd> confirma e <kbd>Shift+Enter</kbd> quebra a linha.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  const FUNCTION_URL = "https://rftveyvbitiysymutdir.supabase.co/functions/v1/correction";
+  const SUPABASE_URL = "https://rftveyvbitiysymutdir.supabase.co";
+  // anon key is public by design (RLS denies data; it only signs users in)
+  const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJmdHZleXZiaXRpeXN5bXV0ZGlyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzNzczNjMsImV4cCI6MjEwMTk1MzM2M30.N1Pg5DV5S1vxx_fo6gKsYtGHoEN2xqRXEoBX58Avako";
+
+  const $ = (id) => document.getElementById(id);
+  const escapeHtml = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  // Same renderer as admin.html: $...$ through KaTeX, the rest through marked.
+  function renderRich(md) {
+    const math = [];
+    const pt = String(md || "").replace(/\$([^$]+)\$/g, (m, tex) => {
+      let h; try { h = katex.renderToString(tex, { throwOnError: false }); }
+      catch { h = escapeHtml(m); }
+      return "@@MATH" + (math.push(h) - 1) + "@@";
+    });
+    let html; try { html = marked.parse(pt, { breaks: true }); } catch { html = escapeHtml(pt); }
+    if (window.DOMPurify) html = DOMPurify.sanitize(html);
+    return html.replace(/@@MATH(\d+)@@/g, (_, i) => math[+i]);
+  }
+
+  // ---------- auth (identical flow to admin.html) ----------
+  const SESS_LS = "ilc-supa-session";
+  let ROLE = null, EMAIL = null;
+  const loadSession = () => { try { return JSON.parse(localStorage.getItem(SESS_LS) || "null"); } catch { return null; } };
+  const saveSession = (s) => localStorage.setItem(SESS_LS, JSON.stringify(s));
+  const clearSession = () => localStorage.removeItem(SESS_LS);
+
+  function captureHash() {
+    if (!location.hash || location.hash.indexOf("access_token") < 0) return;
+    const h = new URLSearchParams(location.hash.slice(1));
+    const at = h.get("access_token");
+    if (at) saveSession({
+      access_token: at, refresh_token: h.get("refresh_token"),
+      expires_at: Date.now() + (parseInt(h.get("expires_in") || "3600", 10)) * 1000,
+    });
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+
+  async function getValidToken() {
+    const s = loadSession();
+    if (!s || !s.access_token) return null;
+    if (Date.now() < s.expires_at - 60000) return s.access_token;
+    if (!s.refresh_token) { clearSession(); return null; }
+    try {
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+        method: "POST",
+        headers: { apikey: SUPABASE_ANON, "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: s.refresh_token }),
+      });
+      if (!res.ok) { clearSession(); return null; }
+      const d = await res.json();
+      saveSession({ access_token: d.access_token, refresh_token: d.refresh_token,
+        expires_at: Date.now() + (d.expires_in || 3600) * 1000 });
+      return d.access_token;
+    } catch { return null; }
+  }
+
+  window.signInGoogle = function () {
+    const redirect = location.origin + location.pathname;
+    location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirect)}`;
+  };
+  window.signOut = async function () {
+    const s = loadSession();
+    if (s && s.access_token) {
+      try { await fetch(`${SUPABASE_URL}/auth/v1/logout`, { method: "POST",
+        headers: { apikey: SUPABASE_ANON, Authorization: "Bearer " + s.access_token } }); } catch {}
+    }
+    clearSession(); location.reload();
+  };
+
+  async function api(payload) {
+    const headers = { "Content-Type": "application/json" };
+    const token = await getValidToken();
+    if (token) headers["Authorization"] = "Bearer " + token;
+    const res = await fetch(FUNCTION_URL, { method: "POST", headers, body: JSON.stringify(payload) });
+    let data = {}; try { data = await res.json(); } catch {}
+    return { ok: res.ok, status: res.status, data };
+  }
+
+  function say(text, cls) { const m = $("msg"); m.textContent = text || ""; m.className = cls || ""; }
+
+  // ---------- state ----------
+  let RUN = null, QID = null, ITEMS = [], CRIT = [], QUESTION = null, IDX = 0;
+  let score = 0, met = {}, manual = false, dirty = false;
+  let rot = 0, scale = 1;
+  let signedAt = 0;   // signed URLs last 15 min; refresh before they lapse
+
+  const round = (n) => Math.round(n * 100) / 100;
+  const fmtScore = (n) => (n == null ? "—" : String(round(n)).replace(".", ","));
+  const cur = () => ITEMS[IDX] || null;
+
+  function scoreFromCriteria() {
+    let s = 0;
+    for (const c of CRIT) if (met[c.key]) s += Number(c.points) || 0;
+    return round(s);
+  }
+
+  // ---------- rendering ----------
+  function renderSidebar() {
+    const done = ITEMS.filter((i) => i.decision).length;
+    $("prog").innerHTML = `<b>${done}</b> / ${ITEMS.length} corrigidas`;
+    $("sidebar").innerHTML = ITEMS.map((it, i) => {
+      const s = it.decision ? fmtScore(it.decision.score)
+                            : (it.proposal ? fmtScore(it.proposal.score) : "—");
+      const clus = i > 0 && it.clusterKey && it.clusterKey === ITEMS[i - 1].clusterKey;
+      return `<div class="srow ${i === IDX ? "cur" : ""} ${it.decision ? "done" : ""} ${clus ? "clus" : ""}"
+                   data-i="${i}"><span class="nm">${escapeHtml(it.studentName || it.studentKey)}</span>
+              <span class="sc">${s}</span></div>`;
+    }).join("");
+    const el = $("sidebar").querySelector(".srow.cur");
+    if (el) el.scrollIntoView({ block: "nearest" });
+  }
+
+  function renderCriteria() {
+    if (!CRIT.length) {
+      $("critTable").innerHTML =
+        `<tr><td class="hint">Nenhum critério definido. Abra o <b>Barema</b> (tecla b).</td></tr>`;
+      return;
+    }
+    const notes = (cur() && cur().proposal && cur().proposal.criteria) || {};
+    $("critTable").innerHTML = CRIT.map((c, i) => {
+      const on = !!met[c.key];
+      const note = notes[c.key] && notes[c.key].note ? notes[c.key].note : "";
+      return `<tr class="${on ? "met" : ""}">
+        <td class="k">${i < 9 ? i + 1 : ""}</td>
+        <td><label class="lb"><input type="checkbox" data-key="${escapeHtml(c.key)}" ${on ? "checked" : ""}>
+            ${escapeHtml(c.label)}</label>
+          ${c.detail ? `<div class="dt">${escapeHtml(c.detail)}</div>` : ""}
+          ${note ? `<div class="note">${escapeHtml(note)}</div>` : ""}</td>
+        <td class="p">${fmtScore(c.points)}</td></tr>`;
+    }).join("");
+  }
+
+  function renderScans() {
+    const it = cur();
+    const body = $("scanBody");
+    if (!it) { body.innerHTML = ""; return; }
+    if (!it.images.length) {
+      body.innerHTML = it.typedAnswer
+        ? `<div class="noimg">Resposta digitada — sem imagem.</div>`
+        : `<div class="noimg">Sem imagem para esta resposta.</div>`;
+      return;
+    }
+    body.innerHTML = it.images.map((u) =>
+      `<img src="${escapeHtml(u)}" style="transform:rotate(${rot}deg) scale(${scale})"
+            onerror="window.__imgFail && window.__imgFail()">`).join("");
+  }
+
+  function render() {
+    const it = cur();
+    if (!it) {
+      $("student").textContent = "—";
+      $("scoreVal").textContent = "—"; $("critTable").innerHTML = ""; $("scanBody").innerHTML = "";
+      return;
+    }
+    $("student").textContent = it.studentName || it.studentKey;
+
+    const sameCluster = ITEMS.filter((x) => it.clusterKey && x.clusterKey === it.clusterKey).length;
+    $("clusterInfo").textContent = sameCluster > 1
+      ? `${sameCluster} alunos deram esta mesma resposta` : "";
+
+    $("scoreVal").textContent = fmtScore(score);
+    $("scoreMax").textContent = "/ " + fmtScore(it.max || 0);
+    const b = $("stateBadge");
+    if (it.decision) {
+      b.className = "badge done";
+      b.textContent = `${it.decision.kind === "accept" ? "aceita" : "ajustada"} por ${it.decision.by.split("@")[0]}`;
+    } else if (manual) { b.className = "badge man"; b.textContent = "nota manual"; }
+    else { b.className = "badge"; b.textContent = it.proposal ? "proposta do modelo" : "sem proposta"; }
+
+    renderCriteria();
+    $("transc").value = it.transcription || it.typedAnswer || "";
+    $("transcView").innerHTML = renderRich($("transc").value);
+    $("promptView").innerHTML = renderRich((QUESTION && QUESTION.prompt) || "");
+    renderScans();
+    renderSidebar();
+    prefetch();
+  }
+
+  // Keep the next few scans warm so ← / → never waits on the network.
+  function prefetch() {
+    for (let k = 1; k <= 3; k++) {
+      const it = ITEMS[IDX + k];
+      if (it) for (const u of it.images) { const im = new Image(); im.src = u; }
+    }
+  }
+
+  // Load the working state for the item at IDX: a human decision if there is
+  // one, otherwise the model's proposal repriced against the current barème.
+  function loadItemState() {
+    const it = cur();
+    if (!it) return;
+    met = {}; manual = false; dirty = false;
+    rot = 0; scale = 1;                       // a new scan starts unrotated
+    if (it.decision) {
+      score = Number(it.decision.score);
+      met = Object.assign({}, it.decision.criteria || {});
+      for (const k in met) met[k] = met[k] && met[k].met === true;
+      $("justif").value = it.decision.justification || "";
+    } else if (it.proposal) {
+      for (const c of CRIT) met[c.key] = it.proposal.criteria?.[c.key]?.met === true;
+      // A score inherited from the cluster wins over the model's own: it is the
+      // one a person already applied twice to this same answer.
+      score = it.clusterScore != null ? it.clusterScore : scoreFromCriteria();
+      manual = it.clusterScore != null;
+      $("justif").value = it.proposal.justification || "";
+    } else {
+      score = 0; $("justif").value = "";
+    }
+    render();
+  }
+
+  function go(delta) {
+    const n = IDX + delta;
+    if (n < 0 || n >= ITEMS.length) return;
+    IDX = n; loadItemState(); say("");
+  }
+
+  function jump(i) { if (i >= 0 && i < ITEMS.length) { IDX = i; loadItemState(); say(""); } }
+
+  function bumpScore(d) {
+    const max = cur() ? Number(cur().max || 0) : 0;
+    score = round(Math.min(max, Math.max(0, score + d)));
+    manual = true; dirty = true;
+    render();
+  }
+
+  function toggleCrit(key) {
+    met[key] = !met[key];
+    score = scoreFromCriteria(); manual = false; dirty = true;
+    render();
+  }
+
+  // ---------- committing ----------
+  async function commit() {
+    const it = cur();
+    if (!it) return;
+    if (!CRIT.length) { say("Defina o barema desta questão antes de corrigir (tecla b).", "err"); return; }
+    const justification = $("justif").value;
+    const proposed = it.proposal ? it.proposal.score : null;
+    const untouched = !dirty && !it.decision && proposed !== null &&
+                      round(score) === round(proposed) &&
+                      justification === (it.proposal.justification || "");
+    const criteria = {};
+    for (const c of CRIT) criteria[c.key] = { met: !!met[c.key] };
+
+    say("salvando…");
+    const r = await api({
+      action: "commit", itemId: it.id, kind: untouched ? "accept" : "override",
+      score, justification, criteria,
+    });
+    if (!r.ok) { say(r.data.message || r.data.error || "Falha ao salvar.", "err"); return; }
+    it.decision = { score, justification, criteria, kind: untouched ? "accept" : "override",
+                    by: EMAIL, at: new Date().toISOString() };
+
+    // A repeated identical correction in a cluster becomes the cluster's new
+    // default: the following unreviewed answers with the same content inherit
+    // it, so an anomalous first item cannot poison the whole group.
+    propagateInCluster(it);
+
+    say(untouched ? "aceita" : "ajustada", "ok");
+    if (IDX < ITEMS.length - 1) go(1); else render();
+  }
+
+  function propagateInCluster(src) {
+    if (!src.clusterKey) return;
+    const peers = ITEMS.filter((x) => x.clusterKey === src.clusterKey && x.decision);
+    if (peers.length < 2) return;
+    const last = peers.slice(-2);
+    if (round(last[0].decision.score) !== round(last[1].decision.score)) return;
+    const s = round(last[0].decision.score);
+    let n = 0;
+    for (const x of ITEMS) {
+      if (x.clusterKey === src.clusterKey && !x.decision && round(x.clusterScore ?? NaN) !== s) {
+        x.clusterScore = s;                   // read back by loadItemState()
+        n++;
+      }
+    }
+    if (n) say(`nota ${fmtScore(s)} virou o padrão deste grupo (${n} respostas)`, "ok");
+  }
+
+  async function regrade() {
+    const it = cur();
+    if (!it) return;
+    if (!CRIT.length) { say("Defina o barema primeiro (tecla b).", "err"); return; }
+    say("re-avaliando com o modelo…");
+    const r = await api({ action: "regrade", itemId: it.id, transcription: $("transc").value });
+    if (!r.ok) { say(r.data.detail || r.data.message || r.data.error || "Falha.", "err"); return; }
+    it.transcription = r.data.transcription;
+    it.transcriptionEdited = true;
+    it.proposal = r.data.proposal;
+    it.max = r.data.max;
+    it.decision = null;              // a fresh proposal reopens the answer
+    loadItemState();
+    say("nova proposta do modelo", "ok");
+  }
+
+  // ---------- loading ----------
+  window.onRunChange = async function () {
+    RUN = $("runSel").value;
+    const r = await api({ action: "getRubric", runId: RUN });
+    if (!r.ok) { say(r.data.message || r.data.error || "Falha ao carregar.", "err"); return; }
+    window.__rubric = r.data.questions || [];
+    $("qSel").innerHTML = window.__rubric.map((q) =>
+      `<option value="${escapeHtml(q.question_id)}">${escapeHtml(q.question_id)} — ${fmtScore(q.max)} pts</option>`).join("");
+    if (window.__rubric.length) { QID = window.__rubric[0].question_id; $("qSel").value = QID; await loadQueue(); }
+  };
+
+  window.loadQueue = async function () {
+    QID = $("qSel").value;
+    say("carregando…");
+    const r = await api({ action: "queue", runId: RUN, questionId: QID, order: $("orderSel").value });
+    if (!r.ok) { say(r.data.message || r.data.error || "Falha ao carregar a fila.", "err"); return; }
+    QUESTION = r.data.question; CRIT = r.data.criteria || []; ITEMS = r.data.items || [];
+    signedAt = Date.now();
+    IDX = ITEMS.findIndex((i) => !i.decision);
+    if (IDX < 0) IDX = 0;
+    loadItemState();
+    say(ITEMS.length ? "" : "Nenhuma resposta importada para esta questão.");
+  };
+
+  // Signed URLs expire after 15 minutes; refresh them quietly, keeping position.
+  async function refreshUrls() {
+    if (!RUN || !QID || Date.now() - signedAt < 11 * 60 * 1000) return;
+    const r = await api({ action: "queue", runId: RUN, questionId: QID, order: $("orderSel").value });
+    if (!r.ok) return;
+    const byId = {};
+    for (const it of r.data.items) byId[it.id] = it;
+    for (const it of ITEMS) if (byId[it.id]) it.images = byId[it.id].images;
+    signedAt = Date.now();
+    renderScans();
+  }
+  setInterval(refreshUrls, 60 * 1000);
+  window.__imgFail = function () { signedAt = 0; refreshUrls(); };
+
+  // ---------- barème editor ----------
+  window.openRubric = function () {
+    const q = (window.__rubric || []).find((x) => x.question_id === QID);
+    $("rubQ").textContent = QID || "—";
+    $("rubRef").value = (q && q.reference) || "";
+    $("rubGuide").value = (q && q.guidance) || "";
+    const tb = $("rubTable").querySelector("tbody");
+    tb.innerHTML = "";
+    for (const c of CRIT) addCrit(c);
+    if (!CRIT.length) addCrit();
+    $("rubMsg").textContent = "";
+    $("rubricOv").classList.remove("hidden");
+    updateRubTotal();
+  };
+  window.closeRubric = function () { $("rubricOv").classList.add("hidden"); };
+
+  window.addCrit = function (c) {
+    const tb = $("rubTable").querySelector("tbody");
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td><input class="ck" value="${escapeHtml((c && c.key) || "")}" placeholder="slug_do_criterio"></td>
+       <td><input class="cl" value="${escapeHtml((c && c.label) || "")}"></td>
+       <td><input class="cd" value="${escapeHtml((c && c.detail) || "")}"></td>
+       <td><input class="cp pts" type="number" step="0.5" min="0" value="${(c && c.points) != null ? c.points : 1}"></td>
+       <td><button class="red" style="padding:4px 8px">×</button></td>`;
+    tr.querySelector("button").onclick = () => { tr.remove(); updateRubTotal(); };
+    tr.querySelector(".cp").oninput = updateRubTotal;
+    tb.appendChild(tr);
+    updateRubTotal();
+  };
+
+  function readRubric() {
+    return Array.from($("rubTable").querySelectorAll("tbody tr")).map((tr) => ({
+      key: (tr.querySelector(".ck").value || "").trim().toLowerCase().replace(/[^a-z0-9_]/g, "_"),
+      label: tr.querySelector(".cl").value.trim(),
+      detail: tr.querySelector(".cd").value.trim(),
+      points: parseFloat(tr.querySelector(".cp").value) || 0,
+    })).filter((c) => c.key);
+  }
+  function updateRubTotal() {
+    $("rubTotal").textContent = fmtScore(readRubric().reduce((a, c) => a + c.points, 0));
+  }
+
+  window.proposeRubric = async function () {
+    $("rubMsg").textContent = "pedindo uma proposta ao modelo…";
+    const r = await api({ action: "proposeRubric", runId: RUN, questionId: QID, totalPoints: 6 });
+    if (!r.ok) { $("rubMsg").innerHTML = `<span class="err">${escapeHtml(r.data.detail || r.data.error || "Falha.")}</span>`; return; }
+    const tb = $("rubTable").querySelector("tbody"); tb.innerHTML = "";
+    for (const c of r.data.criteria) addCrit(c);
+    $("rubMsg").innerHTML = `<span class="ok">Proposta gerada — revise antes de salvar.</span>`;
+  };
+
+  window.saveRubric = async function () {
+    const criteria = readRubric();
+    const keys = new Set(criteria.map((c) => c.key));
+    if (keys.size !== criteria.length) { $("rubMsg").innerHTML = `<span class="err">Chaves duplicadas.</span>`; return; }
+    $("rubMsg").textContent = "salvando…";
+    const r = await api({
+      action: "saveRubric", runId: RUN, questionId: QID,
+      question: { prompt: (QUESTION && QUESTION.prompt) || "", reference: $("rubRef").value,
+                  guidance: $("rubGuide").value, position: (QUESTION && QUESTION.position) || 0 },
+      criteria,
+    });
+    if (!r.ok) { $("rubMsg").innerHTML = `<span class="err">${escapeHtml(r.data.detail || r.data.error || "Falha.")}</span>`; return; }
+    closeRubric();
+    const keep = IDX;
+    await onRunChange();
+    $("qSel").value = QID; await loadQueue();
+    jump(Math.min(keep, ITEMS.length - 1));
+    say("Barema salvo — pendentes re-precificadas.", "ok");
+  };
+
+  // ---------- export ----------
+  window.exportCsv = async function () {
+    say("montando CSV…");
+    const r = await api({ action: "exportRows", runId: RUN });
+    if (!r.ok) { say(r.data.message || r.data.error || "Falha.", "err"); return; }
+    const qs = r.data.questions;
+    const byStudent = {};
+    for (const row of r.data.rows) {
+      const s = (byStudent[row.student_key] ??= {
+        name: row.student_name, email: row.student_email, q: {}, by: {}, why: {},
+      });
+      s.q[row.question_id] = row.score == null ? "" : String(row.score).replace(".", ",");
+      s.by[row.question_id] = row.graded_by || "";
+      s.why[row.question_id] = row.justification || "";
+    }
+    const head = ["aluno", "email", ...qs, "total",
+                  ...qs.map((q) => "corretor_" + q), ...qs.map((q) => "justificativa_" + q)];
+    const lines = [head];
+    for (const k of Object.keys(byStudent).sort()) {
+      const s = byStudent[k];
+      const vals = qs.map((q) => s.q[q] ?? "");
+      const total = vals.reduce((a, v) => a + (parseFloat(String(v).replace(",", ".")) || 0), 0);
+      lines.push([s.name, s.email, ...vals, String(round(total)).replace(".", ","),
+                  ...qs.map((q) => s.by[q] || ""), ...qs.map((q) => s.why[q] || "")]);
+    }
+    const csv = lines.map((r2) => r2.map((c) =>
+      `"${String(c == null ? "" : c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = `${RUN}-notas.csv`; a.click();
+    URL.revokeObjectURL(url);
+    say("CSV baixado.", "ok");
+  };
+
+  // ---------- image tools ----------
+  window.rotate = function () { rot = (rot + 90) % 360; renderScans(); };
+  window.zoom = function (d) { scale = Math.max(0.3, Math.min(4, scale + d)); renderScans(); };
+  window.openHelp = function () { $("helpOv").classList.remove("hidden"); };
+  window.closeHelp = function () { $("helpOv").classList.add("hidden"); };
+
+  // ---------- keyboard: a modal editor ----------
+  // Navigation mode owns the arrows; inside a text field the browser does, and
+  // Enter commits (Shift+Enter for a newline) so the hands never leave the keys.
+  const inField = (e) => {
+    const t = e.target;
+    return t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.isContentEditable);
+  };
+
+  document.addEventListener("keydown", async (e) => {
+    if (!$("rubricOv").classList.contains("hidden")) {
+      if (e.key === "Escape") closeRubric();
+      return;                                    // barème dialog owns the keyboard
+    }
+    if (!$("helpOv").classList.contains("hidden")) {
+      if (e.key === "Escape" || e.key === "?") closeHelp();
+      return;
+    }
+
+    if (inField(e)) {
+      if (e.key === "Escape") { e.target.blur(); e.preventDefault(); return; }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        const isTransc = e.target.id === "transc";
+        e.target.blur();
+        if (isTransc) await regrade(); else { dirty = true; await commit(); }
+      }
+      if (e.target.id === "justif") dirty = true;
+      return;                                    // everything else types normally
+    }
+
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    switch (k) {
+      case "ArrowUp":    e.preventDefault(); bumpScore(0.5); break;
+      case "ArrowDown":  e.preventDefault(); bumpScore(-0.5); break;
+      case "ArrowLeft":  e.preventDefault(); go(-1); break;
+      case "ArrowRight": e.preventDefault(); go(1); break;
+      case "Enter":      e.preventDefault(); await commit(); break;
+      case "e":          e.preventDefault(); $("justif").focus(); break;
+      case "t":          e.preventDefault(); $("transc").focus(); break;
+      case "g":          e.preventDefault(); await regrade(); break;
+      case "b":          e.preventDefault(); openRubric(); break;
+      case "r":          e.preventDefault(); rotate(); break;
+      case "s":          e.preventDefault(); $("sidebar").classList.toggle("hidden"); break;
+      case "?":          e.preventDefault(); openHelp(); break;
+      default:
+        if (/^[1-9]$/.test(k)) {
+          const c = CRIT[parseInt(k, 10) - 1];
+          if (c) { e.preventDefault(); toggleCrit(c.key); }
+        }
+    }
+  });
+
+  $("critTable").addEventListener("change", (e) => {
+    if (e.target.dataset && e.target.dataset.key) toggleCrit(e.target.dataset.key);
+  });
+  $("sidebar").addEventListener("click", (e) => {
+    const row = e.target.closest(".srow");
+    if (row) jump(parseInt(row.dataset.i, 10));
+  });
+  $("transc").addEventListener("input", () => { $("transcView").innerHTML = renderRich($("transc").value); });
+
+  // ---------- boot ----------
+  (async function init() {
+    captureHash();
+    const r = await api({ action: "whoami" });
+    if (!r.ok) { $("loggedOut").classList.remove("hidden"); return; }
+    EMAIL = r.data.email; ROLE = r.data.role;
+    $("loggedOut").classList.add("hidden");
+    $("loggedIn").classList.remove("hidden");
+    $("who").textContent = `${EMAIL} · ${ROLE === "teacher" ? "docente" : "monitor"}`;
+    const rs = await api({ action: "listRuns" });
+    const runs = (rs.data && rs.data.runs) || [];
+    $("runSel").innerHTML = runs.map((x) =>
+      `<option value="${escapeHtml(x.id)}">${escapeHtml(x.title)}</option>`).join("");
+    if (runs.length) { $("runSel").value = runs[0].id; await onRunChange(); }
+    else say("Nenhuma correção criada. Importe uma atividade pelo pipeline ou pelo painel.");
+  })();
+})();
+</script>
+</body>
+</html>

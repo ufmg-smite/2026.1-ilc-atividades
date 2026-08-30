@@ -32,9 +32,45 @@ the last version counts.
 | `admin.html` | Teacher control panel — open/close activities, author questions, run analysis |
 | `supabase/` | Database schema and the Edge Function (`functions/submit`) |
 | `export.py` | Download an activity's answers to a CSV (run locally, standard-library Python) |
+| `correcao.html` | Grading page — review one question across all students, keyboard-driven |
+| `supabase/correction.sql` | Schema for the correction app (`correction_*` tables) |
+| `supabase/functions/correction/` | Edge Function serving the grading queue and the audit log |
+| `pipeline/` | Local pipeline: preprocess, transcribe and pre-grade the scans offline |
 
 ## Notes
 
 - **No secrets** are stored in this repo — access codes and API keys live only as Supabase
   secrets. **No questions or student answers** are stored here either.
 - Deployment/configuration details are kept separately from this public repo.
+
+## Correcting handwritten work
+
+`correcao.html` is a second, separate staff page for grading scanned answers. It
+shares only the `staff` allowlist and the private Storage bucket with the quiz
+platform — everything else lives in its own `correction_*` tables and its own
+Edge Function, so it can be lifted into a project of its own later.
+
+How the work is split:
+
+- **On the teacher's machine** (`pipeline/`, see its README): scans are cleaned
+  up, transcribed and pre-graded by local models. No image is sent anywhere.
+- **In the browser**: each answer is reviewed next to its scan, with a proposed
+  score and a justification already written. One key accepts it.
+- **Interactively**: fixing a transcription or re-weighting the barème asks
+  Gemini for a fresh proposal — anonymised text only, the same rule the analysis
+  feature already follows.
+
+Two design points worth knowing before reading the code:
+
+- **The grading model never outputs a score.** It reports which barème criteria
+  an answer satisfies; the points live in `correction_criteria`. Re-weighting the
+  barème is therefore arithmetic, not inference — instant, free, and applied to
+  every answer still pending.
+- **A human decision is final.** Once someone commits a score it is stored as a
+  number and never recomputed, so later barème edits can never quietly rewrite a
+  grade that was already reviewed. `correction_events` is append-only and records
+  who decided what, which is what answers "why did I get this grade?" — and who
+  the student should be sent to.
+
+Setup: run `supabase/correction.sql` once, deploy the `correction` function, and
+add the graders to `staff` (`auth_staff.sql`).

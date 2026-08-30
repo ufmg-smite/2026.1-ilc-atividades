@@ -1,14 +1,21 @@
+# ============================================================
+#  ALL course and student data lives under dados/ — one folder,
+#  one rule. Nothing inside it is ever committed:
+#    dados/exports/    respostas exportadas do Supabase (texto + fotos)
+#    dados/correcoes/  gabaritos gerados (.tex/.pdf/.html)
+#    dados/pipeline/   work.db, scans preparados, logs da transcrição
+# ============================================================
+dados/
+
+# Belt-and-braces: an export written anywhere else is still ignored, so a
+# mistyped -o can never put student work into a commit.
+*_export/
+
 # Never commit exported answers or any local secrets
 *.csv
 *_for_analysis.txt
-notes.txt
 
-# Student data exported by export.py (<quiz-id>_export/: answers, photos, .md).
-# Match every current and future export so student work never reaches the repo.
-*_export/
 
-# Generated correction sheets / gabaritos and their sources — local only.
-correcoes/
 .env
 .env.*
 SETUP.md
@@ -21,3 +28,6 @@ supabase/quizzes.sql
 .claude/
 __pycache__/
 *.pyc
+# Barema seeds carry the QUESTIONS and the GABARITO (reference answers) —
+# same reason quizzes.sql is ignored: students must not read them in advance.
+supabase/correction_seed_*.sql
