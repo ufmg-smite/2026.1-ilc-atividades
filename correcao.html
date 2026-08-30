@@ -158,13 +158,13 @@
     </div>
 
     <div class="sect">
-      <label>Critérios <span class="hint">(1–9 alterna)</span></label>
-      <table class="crit" id="critTable"></table>
+      <label>Justificativa <span class="hint">(e edita · Enter confirma · Shift+Enter quebra linha)</span></label>
+      <textarea id="justif" rows="4"></textarea>
     </div>
 
     <div class="sect">
-      <label>Justificativa <span class="hint">(e edita · Enter confirma · Shift+Enter quebra linha)</span></label>
-      <textarea id="justif" rows="4"></textarea>
+      <label>Critérios <span class="hint">(1–9 alterna)</span></label>
+      <table class="crit" id="critTable"></table>
     </div>
 
     <div class="sect">
@@ -173,10 +173,6 @@
       <div class="rendered" id="transcView"></div>
     </div>
 
-    <div class="sect">
-      <label>Enunciado</label>
-      <div class="rendered" id="promptView"></div>
-    </div>
   </div>
 </main>
 
@@ -189,6 +185,10 @@
       é definitiva. Um critério novo vale só daqui para a frente.</p>
 
     <div class="sect" style="margin-top:14px">
+      <label>Enunciado</label>
+      <div class="rendered" id="rubPrompt"></div>
+    </div>
+    <div class="sect">
       <label>Resposta de referência (gabarito)</label>
       <textarea id="rubRef" rows="3"></textarea>
     </div>
@@ -417,7 +417,6 @@
     renderCriteria();
     $("transc").value = it.transcription || it.typedAnswer || "";
     $("transcView").innerHTML = renderRich($("transc").value);
-    $("promptView").innerHTML = renderRich((QUESTION && QUESTION.prompt) || "");
     renderScans();
     renderSidebar();
     prefetch();
@@ -583,6 +582,7 @@
   window.openRubric = function () {
     const q = (window.__rubric || []).find((x) => x.question_id === QID);
     $("rubQ").textContent = QID || "—";
+    $("rubPrompt").innerHTML = renderRich((QUESTION && QUESTION.prompt) || "");
     $("rubRef").value = (q && q.reference) || "";
     $("rubGuide").value = (q && q.guidance) || "";
     const tb = $("rubTable").querySelector("tbody");
