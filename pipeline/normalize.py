@@ -56,34 +56,3 @@ def slugify(name):
     s = name.strip().lower()
     s = re.sub(r"[^a-z0-9]", "-", s)
     return re.sub(r"-+", "-", s).strip("-")
-
-
-def looks_degenerate(text, truncated=False):
-    """True when a transcription is model noise rather than a reading.
-
-    A small VLM given an upside-down page does not say so — it reports
-    `orientation: 0`, then falls into a repetition loop and generates until the
-    token cap. Two signals, in order of reliability:
-
-    1. `truncated` — the model never stopped on its own. A real page of logic is
-       well under the cap, so hitting it means it was looping. This is the
-       primary test; the text heuristics below only catch loops that stopped.
-    2. Compressibility. The observed garbage was one unbroken string
-       ("\\land\\neg q\\land\\neg r\\land\\neg s..."), so word-level checks
-       miss it entirely, but it deflates to a fraction of its size.
-    """
-    if truncated:
-        return True
-    t = (text or "").strip()
-    if not t:
-        return False                       # genuinely blank: not degenerate
-    if len(t) > 200:
-        import zlib
-        if len(zlib.compress(t.encode(), 6)) / len(t) < 0.28:
-            return True
-    words = t.split()
-    if len(words) >= 20:
-        top = max(words.count(w) for w in set(words))
-        if top / len(words) > 0.35:        # one token carrying a third of the text
-            return True
-    return False

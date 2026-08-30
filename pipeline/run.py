@@ -246,52 +246,26 @@ def cmd_transcribe(a):
 
 
 def _transcribe_one(model, path, run_id, row, idx):
-    """One image, with a rotation fallback.
+    """Read one prepared image.
 
-    The page is read as-is first. If the result is degenerate — the repetition
-    loop a small VLM falls into when the page is upside down — the image is
-    re-prepared rotated and read again, and the better of the two is kept.
-    Only failures pay for the second call, and on this data the retry turns a
-    60-second stream of noise into a clean 4-second reading.
+    No orientation handling here on purpose. Scans come off the scanner upright,
+    and a small VLM cannot detect rotation anyway — it reports orientation 0 and
+    transcribes the rotated glyphs literally. For the rare crooked photo, record
+    the angle once in dados/pipeline/<run>/rotations.json (see `run.py rotate`)
+    and it is applied at preprocess time.
     """
     msgs = [{"role": "system", "content": prompts.TRANSCRIBE_SYSTEM},
             {"role": "user", "content": prompts.TRANSCRIBE_USER}]
-
-    def read(img):
-        try:
-            out = llm.chat_json(model, msgs, images=[img])
-            text = (out.get("transcription") or "").strip()
-            return text, bool(out.get("legible", True)), llm.last_call_truncated()
-        except llm.Truncated:
-            return "", False, True
-        except Exception as e:                      # noqa: BLE001
-            # A repetition loop truncates the JSON mid-string, so the parse
-            # fails here rather than in the Truncated branch above. The done
-            # reason is still recorded, and it is what triggers the retry.
-            trunc = llm.last_call_truncated()
-            log(f"    ({os.path.basename(img)}: {type(e).__name__}"
-                f"{', truncado' if trunc else ''})")
-            return "", False, trunc
-
-    text, legible, trunc = read(path)
-    if not normalize.looks_degenerate(text, trunc):
-        return {"transcription": text, "legible": legible, "rotated": 0}
-
-    src = store.jload(row["images"])[idx - 1]
-    for rot in (180, 90, 270):
-        fixed = os.path.join(workdir(run_id, "prepared"),
-                             f"{row['question_id']}__{row['student_key']}__{idx}r{rot}.webp")
-        try:
-            preprocess.prepare(src, fixed, rotate=rot)
-        except Exception:                           # noqa: BLE001
-            continue
-        alt, alt_legible, alt_trunc = read(fixed)
-        if alt and not normalize.looks_degenerate(alt, alt_trunc):
-            log(f"    (girada {rot}° para ficar legível)")
-            return {"transcription": alt, "legible": alt_legible, "rotated": rot}
-
-    # every orientation failed: keep it, flagged, and let the reviewer see it
-    return {"transcription": text, "legible": False, "rotated": 0}
+    try:
+        out = llm.chat_json(model, msgs, images=[path])
+        return {"transcription": (out.get("transcription") or "").strip(),
+                "legible": bool(out.get("legible", True))}
+    except Exception as e:                          # noqa: BLE001
+        # An unreadable page yields an empty transcription flagged illegible, so
+        # it sorts to the front of the review queue instead of looking blank.
+        log(f"    ({os.path.basename(path)}: {type(e).__name__}"
+            f"{', truncado' if llm.last_call_truncated() else ''})")
+        return {"transcription": "", "legible": False}
 
 
 # ------------------------------------------------------------------ cluster
@@ -316,6 +290,10 @@ def cmd_grade(a):
     s = db(a.run)
     rub = supa.rubric(a.run)
     rows = s.pending(a.run, "criteria", a.question)
+    if a.only_images:
+        # Typed answers are already perfect text — grading them exercises the
+        # model but not the pipeline. When testing, spend the GPU on the scans.
+        rows = [r for r in rows if store.jload(r["images"])]
     todo = []
     skipped = set()
     for r in rows:
@@ -353,17 +331,27 @@ def cmd_grade(a):
 # ------------------------------------------------------------------ push
 def cmd_push(a):
     s = db(a.run)
-    rows = [r for r in s.all(a.run, a.question) if not r["pushed"]]
+    rows = [r for r in s.all(a.run, a.question) if a.force or not r["pushed"]]
+    if a.only_images:
+        rows = [r for r in rows if store.jload(r["images"])]
+    if a.proposals_only:
+        # After a grading pass the items are already up; only the new proposals
+        # need to go. correction_proposals is append-only and the newest row
+        # wins, so re-sending one is a new proposal, not a duplicate to clean up.
+        rows = [r for r in s.all(a.run, a.question) if r["criteria"]]
+        if a.only_images:
+            rows = [r for r in rows if store.jload(r["images"])]
     log(f"enviando {len(rows)} respostas para o Supabase…")
 
     for i, r in enumerate(rows, 1):
         paths = []
-        for k, local in enumerate(store.jload(r["prepared"]), 1):
+        for k, local in enumerate([] if a.proposals_only else store.jload(r["prepared"]), 1):
             obj = f"correcao/{a.run}/{r['question_id']}/{r['student_key']}-{k}.webp"
             supa.upload(local, obj, content_type="image/webp")
             paths.append(obj)
 
-        supa.post(
+        if not a.proposals_only:
+            supa.post(
             "correction_items?on_conflict=run_id,question_id,student_key",
             [{
                 "run_id": a.run, "question_id": r["question_id"], "student_key": r["student_key"],
@@ -372,7 +360,7 @@ def cmd_push(a):
                 "transcription": r["transcription"] or "", "cluster_key": r["cluster_key"],
             }],
             prefer="resolution=merge-duplicates,return=minimal",
-        )
+            )
 
         if r["criteria"]:
             item = supa.get(
@@ -464,8 +452,15 @@ def main():
 
     p = add("grade", cmd_grade, question=True)
     p.add_argument("--model", required=True, help="modelo de texto, ex.: qwen3:8b")
+    p.add_argument("--only-images", action="store_true",
+                   help="avaliar só as respostas manuscritas (ignora as digitadas)")
 
-    add("push", cmd_push, question=True)
+    p = add("push", cmd_push, question=True)
+    p.add_argument("--force", action="store_true", help="reenviar mesmo o que já foi enviado")
+    p.add_argument("--proposals-only", action="store_true",
+                   help="enviar só as propostas do modelo (itens e imagens já estão lá)")
+    p.add_argument("--only-images", action="store_true",
+                   help="enviar só as respostas manuscritas (ignora as digitadas)")
     add("status", cmd_status)
 
     a = ap.parse_args()

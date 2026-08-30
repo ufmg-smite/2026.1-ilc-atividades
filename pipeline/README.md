@@ -140,23 +140,22 @@ o que mata a sombra da estante e quase todo o vazamento da página de trás),
 depois endireitar sobre a tinta já limpa, depois esticar o contraste, e só então
 reduzir para 1600 px. Esticar o contraste antes de achatar amplificaria a sombra.
 
-### Rotação é manual, e isso é de propósito
+### Rotação
 
-Um VLM pequeno **não** sabe dizer que a página está de cabeça para baixo. Ele
-responde `orientation: 0` e transcreve os glifos girados ao pé da letra — um `p`
-invertido vira `d`, um `q` vira `b` — produzindo uma resposta errada de aparência
-plausível, e não um erro visível. Medido nesta base: girada, a mesma foto sai em
-2,7 s e correta; sem girar, sai em 4 s e sem sentido, com `legible: true`.
+O pré-processamento **não** tenta descobrir a orientação. Scans saem do scanner
+em pé, e um VLM pequeno não sabe dizer que a página está girada: ele responde
+`orientation: 0` e transcreve os glifos girados ao pé da letra — um `p` invertido
+vira `d`, um `q` vira `b` — produzindo uma resposta errada de aparência plausível
+em vez de um erro visível.
 
-Por isso não há detecção automática. Para as fotos antigas, marque as poucas
-tortas à mão:
+Para as fotos tortas que ainda apareçam, registre o ângulo uma vez:
 
 ```bash
 python3 run.py rotate --run dcc638-atv3 --image q1__ana-luiza__1 --degrees 180
 ```
 
-Isso grava em `dados/pipeline/<run>/rotations.json`, re-prepara a imagem e marca o item
-para nova transcrição. Com scans de mesa esse arquivo fica vazio.
+Isso grava em `dados/pipeline/<run>/rotations.json`, re-prepara a imagem e marca
+o item para nova transcrição. Com scans de mesa o arquivo fica vazio.
 
 A rede de segurança real é a tela de correção: transcrição e imagem lado a lado,
 e `t` corrige. Uma transcrição ruim custa uma tecla, não uma nota errada.
