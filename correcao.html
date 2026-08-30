@@ -170,7 +170,6 @@
     <div class="sect">
       <label>Transcrição <span class="hint">(t edita · Enter salva e re-avalia · g re-avalia)</span></label>
       <textarea id="transc" rows="6"></textarea>
-      <div class="rendered" id="transcView"></div>
     </div>
 
   </div>
@@ -416,7 +415,6 @@
 
     renderCriteria();
     $("transc").value = it.transcription || it.typedAnswer || "";
-    $("transcView").innerHTML = renderRich($("transc").value);
     renderScans();
     renderSidebar();
     prefetch();
@@ -750,7 +748,6 @@
     const row = e.target.closest(".srow");
     if (row) jump(parseInt(row.dataset.i, 10));
   });
-  $("transc").addEventListener("input", () => { $("transcView").innerHTML = renderRich($("transc").value); });
 
   // ---------- boot ----------
   (async function init() {
