@@ -237,14 +237,12 @@ def cmd_transcribe(a):
             texts.append(out.get("transcription") or "")
             legible = legible and bool(out.get("legible", True))
 
-        text = "\n\n".join(t for t in texts if t).strip()
-        # A student may type part of the answer and photograph the rest — the
-        # answer is both. Grading the photo alone made the model report
-        # questions as unanswered that the student had in fact answered.
-        typed = (r["typed_answer"] or "").strip()
-        if typed and text and not text.startswith(typed):
-            text = f"{typed}\n\n--- foto anexada ---\n{text}"
-        s.update(r["id"], transcription=text, legible=int(legible), model_transc=a.model)
+        # Only what is written on the page. A student who also typed part of the
+        # answer into the platform is graded here on the handwriting alone —
+        # mixing the two would credit criteria that the scan does not evidence,
+        # and the scan is the thing this pipeline exists to grade.
+        s.update(r["id"], transcription="\n\n".join(t for t in texts if t).strip(),
+                 legible=int(legible), model_transc=a.model)
         if i % 10 == 0:
             rate = (time.time() - t0) / i
             log(f"  {i}/{len(rows)}  (~{rate:.1f}s cada, faltam ~{rate * (len(rows) - i) / 60:.0f} min)")
@@ -318,7 +316,9 @@ def cmd_grade(a):
         answer = r["transcription"] or r["typed_answer"] or ""
         prompt = prompts.grading_prompt(q, q["criteria"], answer)
         try:
-            out = llm.chat_json(a.model, [{"role": "user", "content": prompt}])
+            out = llm.chat_json(a.model, [{"role": "user", "content": prompt}],
+                                think=not a.no_think,
+                                num_predict=4096 if not a.no_think else 1024)
         except Exception as e:                          # noqa: BLE001
             log(f"  ! {r['student_key']} {r['question_id']}: {e}")
             continue
@@ -469,6 +469,9 @@ def main():
     p.add_argument("--model", required=True, help="modelo de texto, ex.: qwen3:8b")
     p.add_argument("--only-images", action="store_true",
                    help="avaliar só as respostas manuscritas (ignora as digitadas)")
+    p.add_argument("--no-think", action="store_true",
+                   help="desligar o raciocínio do modelo: ~4x mais rápido e "
+                        "mediblemente pior (ver pipeline/README.md)")
 
     p = add("push", cmd_push, question=True)
     p.add_argument("--force", action="store_true", help="reenviar mesmo o que já foi enviado")

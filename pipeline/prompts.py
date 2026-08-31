@@ -37,6 +37,14 @@ def grading_prompt(question, criteria, answer):
         "- Você NÃO atribui nota. Diga apenas, para cada critério, se ele foi satisfeito.",
         "- Dê crédito pelo que a resposta CONSEGUE, não por ela coincidir com a resposta de referência.",
         "  Caminhos alternativos válidos valem integralmente.",
+        "- PRIMEIRO, liste em `itens_respondidos` quais itens (a, b, c) a folha de fato",
+        "  aborda: um item entra na lista se houver qualquer tentativa dele, mesmo errada.",
+        "- Critérios de um item que NÃO está nessa lista são automaticamente NÃO satisfeitos",
+        "  — a folha não traz evidência deles. Não presuma que o aluno respondeu noutro lugar.",
+        "- Para os itens QUE ESTÃO na lista, avalie cada critério normalmente, conferindo",
+        "  linha a linha, e cite em `note` o trecho exato que comprova quando marcar",
+        "  satisfeito. Se o aluno escreveu o nome de uma lei ao lado dos passos, o critério",
+        "  das leis ESTÁ satisfeito.",
         "- A transcrição vem de reconhecimento de manuscrito e pode conter erros de leitura.",
         "  Se algo parecer um erro de transcrição e não um erro do aluno, diga isso na justificativa.",
         "- Na justificativa (2 a 3 frases, português): diga o que está certo, aponte o erro exato",
@@ -62,8 +70,10 @@ def grading_prompt(question, criteria, answer):
     parts.append(
         "\nResponda em JSON com esta forma, uma entrada por critério, usando "
         "exatamente estas chaves: " + keys + "\n"
-        '{"criteria": {"<chave>": {"met": <true ou false>, "note": "<opcional, '
-        'só se ajudar o corretor>"}}, "justification": "<2 a 3 frases>"}\n'
-        "Marque met=true apenas quando o critério estiver realmente satisfeito."
+        '{"itens_respondidos": ["<a|b|c>"], '
+        '"criteria": {"<chave>": {"met": <true ou false>, "note": "<se met=true, o '
+        'trecho exato que comprova; se met=false, o que faltou>"}}, '
+        '"justification": "<2 a 3 frases>"}\n'
+        "Marque met=true apenas quando puder apontar o trecho que comprova o critério."
     )
     return "\n".join(parts)
