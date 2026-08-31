@@ -72,7 +72,6 @@
     </div>
 
     <div class="row">
-      <button class="status" id="listBtn">Carregar quizzes</button>
       <button class="add" id="newBtn">+ Novo quiz</button>
     </div>
     <label style="font-size:13px;color:#5f6368;margin-top:10px;">
@@ -253,7 +252,6 @@
     initAuth();
 
     // ---------- quiz list ----------
-    $("listBtn").addEventListener("click", loadList);
     $("showArchived").addEventListener("change", loadList);
     async function loadList() {
       $("msg").textContent = "Carregando…"; $("msg").className = "";
