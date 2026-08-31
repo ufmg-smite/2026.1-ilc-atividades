@@ -72,42 +72,11 @@
     .note { font-size:12px; color:#5f6368; margin-top:6px; }
     .center-msg { text-align:center; color:#444; }
 
-    /* ---- proof editor ---- */
-    .pm-overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:50;
-      display:flex; align-items:flex-start; justify-content:center; padding:14px; overflow:auto; }
-    .pm-overlay.hidden { display:none; }
-    .pm-box { background:#fff; border-radius:10px; max-width:640px; width:100%;
-      padding:14px 16px 16px; box-shadow:0 10px 40px rgba(0,0,0,.3); }
-    .pm-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
-    .pm-head strong { font-size:16px; }
-    .pm-x { background:#eee; color:#333; border:0; border-radius:6px; width:30px; height:30px; font-size:15px; cursor:pointer; }
-    .pm-note { font-size:12px; color:#5f6368; line-height:1.45; margin-bottom:8px; }
-    .pm-label { font-size:12px; color:#5f6368; margin:8px 0 4px; }
-    .pm-chain { border:1px solid var(--line); border-radius:6px; padding:8px 10px; min-height:26px;
-      background:#fafafa; font-size:15px; line-height:1.9; overflow-x:auto; }
-    .pm-chain .pm-line { white-space:nowrap; }
-    .pm-lei { color:#5f6368; font-size:13px; }
-    .pm-chips { border:1px dashed var(--line); border-radius:6px; padding:8px; min-height:36px;
-      background:#fff; display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
-    .pm-chip { font-size:18px; padding:5px 8px; border-radius:6px; background:#f2eefb; cursor:pointer;
-      user-select:none; line-height:1.1; }
-    .pm-chip:hover { background:#e6dcfb; }
-    .pm-chip.sel { background:var(--accent); color:#fff; }
-    .pm-dim { color:#9aa0a6; font-size:13px; }
-    .pm-toolbar { display:flex; flex-wrap:wrap; gap:5px; margin:8px 0 6px; }
-    .pm-sym { background:#f5f2fb; border:1px solid var(--line); border-radius:6px; padding:6px 10px; font-size:15px; cursor:pointer; min-width:36px; }
-    .pm-sym:hover { background:#ece4fb; }
-    .pm-input { width:100%; min-height:52px; padding:9px; border:1px solid var(--line); border-radius:6px;
-      font-family:ui-monospace,Menlo,Consolas,monospace; font-size:14px; }
-    .pm-preview { border:1px dashed var(--line); border-radius:6px; padding:8px 10px; margin-top:6px;
-      min-height:24px; font-size:17px; background:#fafafa; overflow-x:auto; }
-    .pm-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
-    .pm-law { font-size:13px; color:#333; }
-    .pm-law select { font:inherit; padding:6px; border:1px solid var(--line); border-radius:6px; }
-    .pm-btn { background:#5f6368; color:#fff; border:0; border-radius:6px; padding:9px 14px; font-size:14px; cursor:pointer; }
-    .pm-btn.primary { background:var(--accent); }
-    .pm-btn.ghost { background:#fff; color:#5f6368; border:1px solid var(--line); }
-    .pm-msg { font-size:13px; color:#5f6368; }
+    /* ---- proof step helper ---- */
+    .pstep { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:6px; font-size:13px; color:#5f6368; }
+    .pstep select { font:inherit; padding:5px; border:1px solid var(--line); border-radius:6px; }
+    .pstep button { background:#ede4fb; border:1px solid var(--line); border-radius:6px; padding:5px 10px; font-size:14px; cursor:pointer; }
+    .pstep button:hover { background:#e0d2fb; }
   </style>
 </head>
 <body>
@@ -148,33 +117,6 @@
     <div id="questions"></div>
     <div class="card center-msg" id="endCard">
       <p>Ao terminar, verifique que cada questão mostra <strong>“✓ Enviado”</strong>.</p>
-    </div>
-  </div>
-
-  <!-- ===== proof editor ===== -->
-  <div id="proofModal" class="pm-overlay hidden">
-    <div class="pm-box">
-      <div class="pm-head"><strong>Editor de demonstração</strong>
-        <button id="pmClose" class="pm-x" type="button">✕</button></div>
-      <div class="pm-note">Digite a fórmula inicial e clique em <b>Adicionar passo</b>. Depois:
-        <b>toque numa subfórmula</b> abaixo para selecioná-la (toque de novo para ampliar),
-        reescreva-a com os botões/teclado, escolha a <b>lei</b> e adicione o próximo passo.
-        A fórmula é copiada para você — sem redigitar.</div>
-      <div id="pmChain" class="pm-chain"></div>
-      <div class="pm-label">Passo atual — toque para selecionar uma parte:</div>
-      <div class="pm-chips" id="pmChips"></div>
-      <div class="pm-toolbar" id="pmToolbar"></div>
-      <textarea id="pmInput" class="pm-input" placeholder="Ex.: p \land (q \lor \neg q)"></textarea>
-      <div id="pmPreview" class="pm-preview"></div>
-      <div class="pm-row">
-        <label class="pm-law">Lei do passo: <select id="pmLaw"></select></label>
-        <button id="pmAdd" class="pm-btn" type="button">Adicionar passo</button>
-        <button id="pmUndo" class="pm-btn ghost" type="button">Desfazer</button>
-      </div>
-      <div class="pm-row">
-        <button id="pmInsert" class="pm-btn primary" type="button">Inserir na resposta</button>
-        <span id="pmMsg" class="pm-msg"></span>
-      </div>
     </div>
   </div>
 
@@ -434,12 +376,6 @@
         b.addEventListener("click", () => insertAtCursor(ta, sym.t, sym.caret));
         tb.appendChild(b);
       });
-      const pb = document.createElement("button");
-      pb.type = "button"; pb.textContent = "⊢ demonstração";
-      pb.title = "Montar uma demonstração passo a passo";
-      pb.style.background = "#e7dcfb"; pb.style.minWidth = "auto";
-      pb.addEventListener("click", () => pmOpen(ta));
-      tb.appendChild(pb);
       card.appendChild(tb);
 
       // textarea (paste disabled)
@@ -452,6 +388,22 @@
       ["paste", "cut", "copy", "drop"].forEach((ev) =>
         ta.addEventListener(ev, (e) => e.preventDefault()));
       card.appendChild(ta);
+
+      // proof step helper — carry a formula to a new line with the law in ( )
+      const pstep = document.createElement("div");
+      pstep.className = "pstep";
+      const lawSel = document.createElement("select");
+      ["(sem lei)"].concat(LAWS).forEach((l) => {
+        const o = document.createElement("option"); o.textContent = l; lawSel.appendChild(o);
+      });
+      const stepBtn = document.createElement("button");
+      stepBtn.type = "button"; stepBtn.textContent = "≡ nova linha";
+      stepBtn.title = "Copia a fórmula selecionada (ou a última linha) para uma nova linha, com a lei entre parênteses";
+      stepBtn.addEventListener("click", () => proofStep(ta, lawSel.value));
+      pstep.appendChild(document.createTextNode("Demonstração:"));
+      pstep.appendChild(lawSel);
+      pstep.appendChild(stepBtn);
+      card.appendChild(pstep);
 
       // preview
       const prev = document.createElement("div");
@@ -602,195 +554,31 @@
       document.querySelectorAll('input[type=file], .thumb-rm').forEach((el) => { el.disabled = true; });
     }
 
-    // ===== Proof editor (Level A: carry-forward + tap-to-select) =====
-    const PM = { target: null, steps: [], tokens: [], nodeFor: null, sel: null };
+    // ===== proof step helper (carry a formula forward with a law annotation) =====
     const LAWS = ["Identidade", "Dominância", "Idempotência", "Dupla negação",
       "Comutatividade", "Associatividade", "Distributividade", "De Morgan",
       "Absorção", "Negação", "Implicação", "Contrapositiva", "Equivalência"];
-    const OPSYM = { NEG: "¬", AND: "∧", OR: "∨", IMP: "→", IFF: "↔", EQUIV: "≡",
-      XOR: "⊕", ALL: "∀", EX: "∃", TRUE: "T", FALSE: "F", LP: "(", RP: ")" };
 
-    function pmTokenize(src) {
-      const CMD = { neg: "NEG", lnot: "NEG", land: "AND", wedge: "AND", lor: "OR", vee: "OR",
-        to: "IMP", rightarrow: "IMP", implies: "IMP", leftrightarrow: "IFF", iff: "IFF",
-        equiv: "EQUIV", oplus: "XOR", top: "TRUE", bot: "FALSE", forall: "ALL", exists: "EX" };
-      const UNI = { "¬": "NEG", "∧": "AND", "∨": "OR", "→": "IMP", "↔": "IFF", "≡": "EQUIV",
-        "⊕": "XOR", "∀": "ALL", "∃": "EX", "⊤": "TRUE", "⊥": "FALSE" };
-      const T = []; let i = 0;
-      while (i < src.length) {
-        const c = src[i];
-        if (/\s/.test(c)) { i++; continue; }
-        if (c === "\\") {
-          let j = i + 1;
-          if (src[j] && /[,;!]/.test(src[j])) { i = j + 1; continue; }
-          let name = ""; while (j < src.length && /[a-zA-Z]/.test(src[j])) { name += src[j]; j++; }
-          if (!name) { i++; continue; }
-          T.push({ type: CMD[name] || "VAR", value: src.slice(i, j), s: i, e: j }); i = j; continue;
-        }
-        if (c === "(") { T.push({ type: "LP", value: "(", s: i, e: i + 1 }); i++; continue; }
-        if (c === ")") { T.push({ type: "RP", value: ")", s: i, e: i + 1 }); i++; continue; }
-        if (UNI[c]) { T.push({ type: UNI[c], value: c, s: i, e: i + 1 }); i++; continue; }
-        if (/[A-Za-z]/.test(c)) {
-          let j = i + 1; while (j < src.length && /[A-Za-z0-9]/.test(src[j])) j++;
-          if (src[j] === "_") { j++; if (src[j] === "{") { while (j < src.length && src[j] !== "}") j++; if (src[j] === "}") j++; } else if (/[A-Za-z0-9]/.test(src[j])) j++; }
-          const val = src.slice(i, j);
-          T.push({ type: val === "T" ? "TRUE" : val === "F" ? "FALSE" : "VAR", value: val, s: i, e: j }); i = j; continue;
-        }
-        i++; // skip unknown char
+    // Copy the selected formula (or the last non-empty line) to a NEW line,
+    // prefixed with ≡ and annotated with the chosen law in parentheses, so the
+    // student edits only the part that changed — no retyping.
+    function proofStep(ta, law) {
+      const val = ta.value;
+      let sel = val.substring(ta.selectionStart, ta.selectionEnd).trim();
+      if (!sel) {
+        const lines = val.split("\n").map((s) => s.trim()).filter(Boolean);
+        sel = lines.length ? lines[lines.length - 1] : "";
       }
-      return T;
-    }
-
-    // Precedence: ↔/≡  <  →  <  ∨/⊕  <  ∧  <  ¬  <  atom. Returns {ast, nodeFor}
-    // where nodeFor maps a token index -> the subformula node it heads (for tap).
-    function pmParse(tokens) {
-      let pos = 0; const nodeFor = {};
-      const peek = () => tokens[pos];
-      function atom() {
-        const t = peek(); if (!t) throw "eof";
-        if (t.type === "LP") { const lp = pos; pos++; const inner = iff(); const r = peek();
-          if (!r || r.type !== "RP") throw ")"; const ri = pos; pos++;
-          const n = { type: "GROUP", s: t.s, e: r.e, child: inner }; inner.parent = n;
-          nodeFor[lp] = n; nodeFor[ri] = n; return n; }
-        if (t.type === "VAR" || t.type === "TRUE" || t.type === "FALSE") {
-          const i = pos; pos++; const n = { type: "ATOM", s: t.s, e: t.e, value: t.value }; nodeFor[i] = n; return n; }
-        if (t.type === "ALL" || t.type === "EX") { const i = pos; pos++;
-          if (peek() && peek().type === "VAR") pos++; const child = unary();
-          const n = { type: "QUANT", s: t.s, e: child.e, child }; child.parent = n; nodeFor[i] = n; return n; }
-        throw "atom";
-      }
-      function unary() { const t = peek();
-        if (t && t.type === "NEG") { const i = pos; pos++; const child = unary();
-          const n = { type: "NEG", s: t.s, e: child.e, child }; child.parent = n; nodeFor[i] = n; return n; }
-        return atom(); }
-      function binL(next, types) { let left = next();
-        while (peek() && types.includes(peek().type)) { const oi = pos; pos++; const right = next();
-          const n = { type: tokens[oi].type, s: left.s, e: right.e, left, right };
-          left.parent = n; right.parent = n; nodeFor[oi] = n; left = n; }
-        return left; }
-      const and = () => binL(unary, ["AND"]);
-      const or = () => binL(and, ["OR", "XOR"]);
-      const imp = () => binL(or, ["IMP"]);
-      const iff = () => binL(imp, ["IFF", "EQUIV"]);
-      const ast = iff();
-      if (pos !== tokens.length) throw "extra";
-      return { ast, nodeFor };
-    }
-
-    function pmOpen(ta) {
-      PM.target = ta; PM.steps = []; PM.sel = null;
-      $("pmLaw").innerHTML = LAWS.map((l) => `<option>${l}</option>`).join("");
-      $("pmInput").value = ""; $("pmMsg").textContent = "";
-      pmRenderChain(); pmSync();
-      $("proofModal").classList.remove("hidden");
-      $("pmInput").focus();
-    }
-    function pmClose() { $("proofModal").classList.add("hidden"); }
-
-    function pmSync() {
-      const src = $("pmInput").value;
-      let toks = []; try { toks = pmTokenize(src); } catch { toks = []; }
-      PM.tokens = toks; PM.sel = null;
-      pmRenderChips();
-      const pv = $("pmPreview");
-      try { pv.innerHTML = src.trim() ? katex.renderToString(src, { throwOnError: false }) : '<span class="pm-dim">pré-visualização</span>'; }
-      catch { pv.textContent = src; }
-    }
-
-    function pmRenderChips() {
-      const box = $("pmChips"); box.innerHTML = ""; PM.nodeFor = null;
-      if (!PM.tokens.length) { box.innerHTML = '<span class="pm-dim">digite uma fórmula e toque numa parte dela</span>'; return; }
-      try { PM.nodeFor = pmParse(PM.tokens).nodeFor; } catch { PM.nodeFor = null; }
-      PM.tokens.forEach((t, idx) => {
-        const c = document.createElement("span"); c.className = "pm-chip";
-        c.textContent = OPSYM[t.type] || t.value; c.dataset.idx = idx;
-        c.addEventListener("click", () => pmTapToken(idx));
-        box.appendChild(c);
-      });
-      if (!PM.nodeFor) { const w = document.createElement("span"); w.className = "pm-dim";
-        w.textContent = " — fórmula incompleta (edite para habilitar a seleção)"; box.appendChild(w); }
-      pmHighlight();
-    }
-
-    function pmTapToken(idx) {
-      if (!PM.nodeFor) return;
-      const tok = PM.tokens[idx]; let node = PM.nodeFor[idx]; if (!node) return;
-      // grow: if the tap is inside the current selection and it has a parent, select the parent
-      if (PM.sel && tok.s >= PM.sel.s && tok.s < PM.sel.e && PM.sel.parent) node = PM.sel.parent;
-      PM.sel = node; pmHighlight();
-      const ta = $("pmInput"); ta.focus(); try { ta.setSelectionRange(node.s, node.e); } catch {}
-    }
-
-    function pmHighlight() {
-      const sel = PM.sel;
-      [...$("pmChips").querySelectorAll(".pm-chip")].forEach((c) => {
-        const t = PM.tokens[+c.dataset.idx];
-        c.classList.toggle("sel", !!(sel && t && t.s >= sel.s && t.s < sel.e));
-      });
-    }
-
-    function pmRenderChain() {
-      const box = $("pmChain"); box.innerHTML = "";
-      if (!PM.steps.length) { box.innerHTML = '<span class="pm-dim">Nenhum passo ainda. Digite a fórmula inicial e clique em “Adicionar passo”.</span>'; return; }
-      PM.steps.forEach((st, i) => {
-        const row = document.createElement("div"); row.className = "pm-line";
-        let math; try { math = katex.renderToString((i ? "\\equiv " : "") + st.formula, { throwOnError: false }); }
-        catch { math = escapeHtml((i ? "≡ " : "") + st.formula); }
-        row.innerHTML = math + (st.law ? ` <span class="pm-lei">(${escapeHtml(st.law)})</span>` : "");
-        box.appendChild(row);
-      });
-    }
-
-    function pmAddStep() {
-      const f = $("pmInput").value.trim();
-      if (!f) { $("pmMsg").textContent = "Digite a fórmula."; return; }
-      PM.steps.push({ formula: f, law: PM.steps.length ? $("pmLaw").value : null });
-      $("pmMsg").textContent = PM.steps.length === 1
-        ? "Fórmula inicial definida. Agora edite-a e escolha a lei do próximo passo."
-        : "Passo adicionado — a fórmula foi copiada para você continuar.";
-      pmRenderChain();
-      const ta = $("pmInput"); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
-    }
-    function pmUndo() {
-      if (!PM.steps.length) return;
-      const last = PM.steps.pop();
-      $("pmInput").value = PM.steps.length ? PM.steps[PM.steps.length - 1].formula : last.formula;
-      $("pmMsg").textContent = ""; pmRenderChain(); pmSync();
-    }
-    function pmInsert() {
-      const steps = PM.steps.slice();
-      const cur = $("pmInput").value.trim();
-      if (cur && (!steps.length || cur !== steps[steps.length - 1].formula)) {
-        steps.push({ formula: cur, law: steps.length ? $("pmLaw").value : null });
-      }
-      if (!steps.length) { $("pmMsg").textContent = "Nada para inserir."; return; }
-      const lines = steps.map((s, i) => i === 0 ? `$${s.formula}$`
-        : `$\\equiv ${s.formula}$` + (s.law ? ` (${s.law})` : ""));
-      const text = lines.join("\n");
-      const ta = PM.target;
-      ta.value = (ta.value.trim() ? ta.value.replace(/\s+$/, "") + "\n" : "") + text;
+      if (!sel) return;
+      const m = sel.match(/\$([^$]+)\$/);            // formula = first $...$ if present
+      const f = (m ? m[1] : sel).replace(/^(\\equiv|≡)\s*/, "").trim();
+      const lei = (law && law !== "(sem lei)") ? ` (${law})` : "";
+      const base = val.replace(/\s*$/, "");
+      ta.value = (base ? base + "\n" : "") + `$\\equiv ${f}$${lei}`;
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
       ta.dispatchEvent(new Event("input"));
-      pmClose();
     }
-
-    $("pmClose").addEventListener("click", pmClose);
-    $("pmAdd").addEventListener("click", pmAddStep);
-    $("pmUndo").addEventListener("click", pmUndo);
-    $("pmInsert").addEventListener("click", pmInsert);
-    $("pmInput").addEventListener("input", pmSync);
-    $("proofModal").addEventListener("click", (e) => { if (e.target === $("proofModal")) pmClose(); });
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && !$("proofModal").classList.contains("hidden")) pmClose();
-    });
-    (function () { // editor symbol toolbar (reuse SYMBOLS, minus $…$ and Tabela)
-      const tb = $("pmToolbar");
-      SYMBOLS.filter((s) => s.l !== "Tabela" && s.l !== "$…$").forEach((sym) => {
-        const b = document.createElement("button"); b.type = "button"; b.className = "pm-sym";
-        b.textContent = sym.l; b.title = sym.title || sym.t.trim();
-        b.addEventListener("click", () => { insertAtCursor($("pmInput"), sym.t, sym.caret); pmSync(); });
-        tb.appendChild(b);
-      });
-    })();
   })();
   </script>
 </body>
