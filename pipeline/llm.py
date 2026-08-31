@@ -77,9 +77,10 @@ def _ollama(model, messages, images, json_mode, temperature, think, num_predict)
     _META["eval_count"] = d.get("eval_count")
     if d.get("done_reason") == "length" and not content.strip():
         raise Truncated(
-            f"{model} estourou o contexto ({d.get('eval_count')} tokens) sem responder. "
-            "Quase sempre é um modelo 'thinking': use a variante -instruct, "
-            "ou aumente PIPELINE_NUM_CTX."
+            f"{model} estourou o limite de geração ({d.get('eval_count')} tokens) sem "
+            "responder. Num modelo de visão, use a variante -instruct (a 'thinking' "
+            "gasta o orçamento raciocinando). Num modelo de texto com raciocínio "
+            "ligado, aumente num_predict, ou PIPELINE_NUM_CTX se o prompt for longo."
         )
     return content
 

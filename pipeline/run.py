@@ -318,7 +318,7 @@ def cmd_grade(a):
         try:
             out = llm.chat_json(a.model, [{"role": "user", "content": prompt}],
                                 think=not a.no_think,
-                                num_predict=4096 if not a.no_think else 1024)
+                                num_predict=6144 if not a.no_think else 1024)
         except Exception as e:                          # noqa: BLE001
             log(f"  ! {r['student_key']} {r['question_id']}: {e}")
             continue
