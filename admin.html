@@ -637,6 +637,7 @@
       const { ok, status, data } = await api({
         action: "saveQuiz",
         quizId: newId,
+        originalId: editingOriginalId, // null for a new quiz -> must not clobber an existing id
         title: $("qtitle").value.trim(),
         description: $("qdesc").value,
         durationMinutes: parseInt($("qdur").value, 10) || 30,

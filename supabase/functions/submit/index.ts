@@ -425,7 +425,19 @@ Deno.serve(async (req) => {
       const dur = Number.isFinite(p.durationMinutes) && p.durationMinutes > 0
         ? Math.min(Math.floor(p.durationMinutes), 600)
         : 30;
+      // `originalId` is the id the editor was opened with (null for a new quiz).
+      // Guard only when the client sent it, so an older cached page (which omits
+      // the field) can still edit during the deploy window.
+      const hasOrig = Object.prototype.hasOwnProperty.call(p, "originalId");
+      const originalId = typeof p.originalId === "string" ? p.originalId : null;
       const existing = await getQuiz(quizId);
+      // Only an edit of THIS same quiz (originalId === quizId) may overwrite an
+      // existing row. A new quiz (or an edit re-typed to a different existing id)
+      // must not silently clobber another quiz that shares the id.
+      if (hasOrig && existing && originalId !== quizId) {
+        return json({ error: "id_exists",
+          message: `Já existe um quiz com o id "${quizId}". Escolha outro id (ou edite o quiz existente).` }, 409);
+      }
       const body = { title, description: description ?? null, questions, duration_minutes: dur };
       let r: Response;
       if (existing) {
