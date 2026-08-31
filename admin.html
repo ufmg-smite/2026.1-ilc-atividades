@@ -557,8 +557,18 @@
 
     // ---------- editor ----------
     let editingOriginalId = null; // id the editor was opened with (null = new quiz)
+    let editorBaseline = "";      // editor state at last open/save — to detect unsaved edits
+    const editorState = () => JSON.stringify({
+      id: $("qid").value, title: $("qtitle").value, desc: $("qdesc").value,
+      dur: $("qdur").value, qs: collectQuestions(),
+    });
+    function closeEditor() {
+      if (editorState() !== editorBaseline &&
+          !confirm("Há alterações não salvas no editor. Fechar mesmo assim? As mudanças serão perdidas.")) return;
+      $("editor").classList.add("hidden");
+    }
     $("newBtn").addEventListener("click", () => openEditor(null));
-    $("cancelBtn").addEventListener("click", () => $("editor").classList.add("hidden"));
+    $("cancelBtn").addEventListener("click", closeEditor);
     $("addQ").addEventListener("click", () => addQuestion(nextQId(), ""));
     $("saveBtn").addEventListener("click", saveQuiz);
 
@@ -592,6 +602,7 @@
       }
       $("editor").classList.remove("hidden");
       $("editor").scrollIntoView({ behavior: "smooth" });
+      editorBaseline = editorState(); // fields populated -> mark as clean
     }
 
     function addQuestion(qid, prompt) {
@@ -647,6 +658,7 @@
         editingOriginalId = newId;
         $("editMsg").textContent = data.created ? "✓ Quiz criado." : "✓ Alterações salvas.";
         $("editMsg").className = "ok";
+        editorBaseline = editorState(); // saved -> clean
         loadList();
       } else {
         $("editMsg").textContent = invalid(status, data); $("editMsg").className = "err";
