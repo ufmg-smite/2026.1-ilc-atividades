@@ -231,8 +231,7 @@
       applyRoleUI();
     }
     // teachers may change state; monitors are read-only.
-    function canWrite() { return ROLE === "teacher" || ROLE === "monitor"; } // author: create/edit/archive
-    function canControl() { return ROLE === "teacher"; }                     // open/close a live session
+    function canWrite() { return ROLE === "teacher" || ROLE === "monitor"; } // any logged-in staff
     function applyRoleUI() { $("newBtn").style.display = canWrite() ? "" : "none"; }
 
     async function initAuth() {
@@ -274,10 +273,10 @@
           `<td>${pill}${(!q.archived && q.isOpen) ? '<br><span class="mini">fecha ' + fmt(q.endsAt) + '</span>' : ''}</td>` +
           `<td></td>`;
         const actions = tr.children[2];
-        const cw = canWrite(), cc = canControl();
+        const cw = canWrite();
         if (!q.archived) {
-          if (cc) actions.appendChild(mkBtn("Abrir", "open", () => doOpen(q.id)));
-          if (cc) actions.appendChild(mkBtn("Fechar", "close", () => doClose(q.id)));
+          if (cw) actions.appendChild(mkBtn("Abrir", "open", () => doOpen(q.id)));
+          if (cw) actions.appendChild(mkBtn("Fechar", "close", () => doClose(q.id)));
           actions.appendChild(mkBtn("Status", "status", () => doStatus(q.id)));
           if (cw) actions.appendChild(mkBtn("Editar", "edit", () => openEditor(q.id)));
           actions.appendChild(mkBtn("Analisar", "status", () => doAnalyze(q.id)));

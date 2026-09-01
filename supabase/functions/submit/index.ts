@@ -182,9 +182,8 @@ async function authStaff(
   return role ? { email, role } : { denied: true };
 }
 
-// Opening/closing a live session is teachers-only; authoring (saveQuiz/rename/
-// archive), reads, analyze and answer export are open to monitors (TAs) too.
-const CONTROL_ACTIONS = new Set(["open", "close"]);
+// Every staff member in the `staff` allowlist (teacher or monitor) may perform
+// all admin actions; the role is kept for reference/audit only.
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -216,9 +215,6 @@ Deno.serve(async (req) => {
     }
     if (action === "whoami") {
       return json({ ok: true, email: who.email, role: who.role }, 200);
-    }
-    if (CONTROL_ACTIONS.has(action) && who.role !== "teacher") {
-      return json({ error: "forbidden", message: "Abrir/fechar a sessão é restrito a docentes." }, 403);
     }
 
     if (action === "listQuizzes") {
