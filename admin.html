@@ -56,8 +56,6 @@
   <!-- ===== auth + quiz list ===== -->
   <div class="card">
     <h1>Painel do professor</h1>
-    <p class="sub">Crie e edite quizzes, abra/feche a sessão, veja as respostas.</p>
-
     <div id="loggedOut">
       <div class="row" style="margin-top:4px;">
         <button class="status" id="googleBtn">Entrar com Google</button>
@@ -69,15 +67,15 @@
       <p class="sub">Conectado como <strong id="whoEmail"></strong>
         <span id="whoRole" class="pill on"></span>
         <button class="ghost" id="logoutBtn" style="margin-left:8px;padding:4px 10px;">Sair</button></p>
+      <p class="sub">Crie e edite quizzes, abra/feche a sessão, veja as respostas.</p>
+      <div class="row">
+        <button class="add" id="newBtn">+ Novo quiz</button>
+      </div>
+      <label style="font-size:13px;color:#5f6368;margin-top:10px;">
+        <input type="checkbox" id="showArchived" style="width:auto;margin-right:6px;vertical-align:middle;">
+        Mostrar quizzes arquivados
+      </label>
     </div>
-
-    <div class="row">
-      <button class="add" id="newBtn">+ Novo quiz</button>
-    </div>
-    <label style="font-size:13px;color:#5f6368;margin-top:10px;">
-      <input type="checkbox" id="showArchived" style="width:auto;margin-right:6px;vertical-align:middle;">
-      Mostrar quizzes arquivados
-    </label>
     <div id="msg"></div>
     <table class="qlist"><tbody id="quizRows"></tbody></table>
   </div>
