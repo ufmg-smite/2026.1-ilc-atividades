@@ -155,7 +155,14 @@
       const headers = { "Content-Type": "application/json" };
       const token = await getValidToken();
       if (token) headers["Authorization"] = "Bearer " + token;
-      const res = await fetch(FUNCTION_URL, { method: "POST", headers, body: JSON.stringify(payload) });
+      let res;
+      try {
+        res = await fetch(FUNCTION_URL, { method: "POST", headers, body: JSON.stringify(payload) });
+      } catch (e) {
+        // network / CORS failure — surface it instead of hanging on "Carregando…"
+        return { ok: false, status: 0, data: { error: "network",
+          message: "Falha de conexão com o servidor. Se persistir, o backend (função) pode precisar ser reimplantado." } };
+      }
       let data = {}; try { data = await res.json(); } catch {}
       return { ok: res.ok, status: res.status, data };
     }
