@@ -36,7 +36,9 @@
     .err { color:#d93025; } .ok { color:#188038; }
     #msg, #editMsg { font-size:14px; min-height:18px; margin-top:8px; white-space:pre-wrap; }
     .qblock { border:1px solid #e0e0e0; border-radius:8px; padding:12px; margin-top:12px; background:#fafafa; }
-    .qhead { display:flex; justify-content:space-between; align-items:center; }
+    .qhead { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+    .qdurlab { margin-left:auto; color:#5f6368; font-size:12px; white-space:nowrap; }
+    .qdur { width:64px; padding:3px 6px; font-size:12px; }
     .preview { border:1px dashed #dadce0; border-radius:6px; padding:8px 10px; margin-top:8px;
                background:#fff; font-size:14px; overflow-x:auto; }
     .preview ul { padding-left:20px; } .preview p { margin:0 0 6px; }
@@ -603,7 +605,7 @@
         $("qtitle").value = q.title || "";
         $("qdesc").value = q.description || "";
         $("qdur").value = q.durationMinutes || 30;
-        (q.questions || []).forEach((qq) => addQuestion(qq.id, qq.prompt));
+        (q.questions || []).forEach((qq) => addQuestion(qq.id, qq.prompt, qq.durationMinutes));
         if (!q.questions || !q.questions.length) addQuestion("q1", "");
       } else {
         $("editTitle").textContent = "Novo quiz";
@@ -617,13 +619,18 @@
       editorBaseline = editorState(); // fields populated -> mark as clean
     }
 
-    function addQuestion(qid, prompt) {
+    function addQuestion(qid, prompt, durationMinutes) {
       const block = document.createElement("div");
       block.className = "qblock"; block.dataset.qid = qid;
       block.innerHTML =
         `<div class="qhead"><strong>Questão <span class="qidlabel"></span></strong>` +
+        `<label class="qdurlab" title="Tempo só desta questão, em minutos. Em branco = usa o tempo global do quiz.">` +
+        `⏱ <input class="qdur" type="number" min="1" max="600" placeholder="global" /> min</label>` +
         `<button class="close rm" type="button">Remover</button></div>`;
       block.querySelector(".qidlabel").textContent = "(" + qid + ")";
+      if (Number.isFinite(durationMinutes) && durationMinutes > 0) {
+        block.querySelector(".qdur").value = durationMinutes;
+      }
       const ta = document.createElement("textarea");
       ta.value = prompt || "";
       ta.placeholder = "Enunciado em Markdown. Fórmulas entre $...$";
@@ -638,10 +645,12 @@
     }
 
     function collectQuestions() {
-      return [...document.querySelectorAll(".qblock")].map((b) => ({
-        id: b.dataset.qid,
-        prompt: b.querySelector("textarea").value,
-      }));
+      return [...document.querySelectorAll(".qblock")].map((b) => {
+        const q = { id: b.dataset.qid, prompt: b.querySelector("textarea").value };
+        const d = parseInt(b.querySelector(".qdur").value, 10);
+        if (Number.isFinite(d) && d > 0) q.durationMinutes = d;
+        return q;
+      });
     }
 
     async function saveQuiz() {

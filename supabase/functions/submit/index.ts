@@ -63,9 +63,38 @@ async function getQuiz(quizId: string) {
   return rows[0] ?? null;
 }
 
+// Per-question timing: a question may carry its own `durationMinutes` (stored in
+// the questions JSON); blank/absent = use the quiz's global duration_minutes. All
+// questions share the same opened_at, so a question's deadline is simply
+// opened_at + (perQ ?? global). This lets e.g. a "challenge" run longer than the rest.
+function qDurationMinutes(quiz: any, qid: string): number {
+  const qs = Array.isArray(quiz.questions) ? quiz.questions : [];
+  const q = qs.find((x: any) => x && x.id === qid);
+  const d = q ? Number(q.durationMinutes) : NaN;
+  return Number.isFinite(d) && d > 0 ? d : quiz.duration_minutes;
+}
+// The quiz stays "open" (loadable) while ANY question is still open: its overall
+// end is opened_at + the LONGEST per-question duration (never below the global).
+function maxDurationMinutes(quiz: any): number {
+  const qs = Array.isArray(quiz.questions) ? quiz.questions : [];
+  let m = quiz.duration_minutes;
+  for (const q of qs) {
+    const d = q ? Number(q.durationMinutes) : NaN;
+    if (Number.isFinite(d) && d > 0 && d > m) m = d;
+  }
+  return m;
+}
+// Is a specific question still accepting submissions? (also the global gate: a
+// question with no own clock closes exactly when the global window ends.)
+function questionOpen(quiz: any, qid: string): boolean {
+  if (!quiz.opened_at || quiz.force_closed) return false;
+  const ends = new Date(quiz.opened_at).getTime() + qDurationMinutes(quiz, qid) * 60000;
+  return Date.now() < ends;
+}
+
 function windowState(quiz: any): { isOpen: boolean; endsAt: string | null } {
   if (!quiz.opened_at || quiz.force_closed) return { isOpen: false, endsAt: null };
-  const ends = new Date(quiz.opened_at).getTime() + quiz.duration_minutes * 60000;
+  const ends = new Date(quiz.opened_at).getTime() + maxDurationMinutes(quiz) * 60000;
   return { isOpen: Date.now() < ends, endsAt: new Date(ends).toISOString() };
 }
 
@@ -220,7 +249,7 @@ Deno.serve(async (req) => {
     if (action === "listQuizzes") {
       const filter = p.includeArchived === true ? "" : "&archived=eq.false";
       const res = await db(
-        `quizzes?select=id,title,opened_at,duration_minutes,force_closed,archived&order=id${filter}`,
+        `quizzes?select=id,title,opened_at,duration_minutes,force_closed,archived,questions&order=id${filter}`,
       );
       if (!res.ok) return json({ error: "Could not list quizzes" }, 500);
       const rows = await res.json();
@@ -434,7 +463,15 @@ Deno.serve(async (req) => {
         return json({ error: "id_exists",
           message: `Já existe um quiz com o id "${quizId}". Escolha outro id (ou edite o quiz existente).` }, 409);
       }
-      const body = { title, description: description ?? null, questions, duration_minutes: dur };
+      // Store a clean questions array: id + prompt, plus an OPTIONAL per-question
+      // durationMinutes (clamped) when set — absent means "use the global clock".
+      const cleanQuestions = questions.map((q: any) => {
+        const out: any = { id: q.id, prompt: q.prompt };
+        const d = Number(q.durationMinutes);
+        if (Number.isFinite(d) && d > 0) out.durationMinutes = Math.min(Math.floor(d), 600);
+        return out;
+      });
+      const body = { title, description: description ?? null, questions: cleanQuestions, duration_minutes: dur };
       let r: Response;
       if (existing) {
         // snapshot the CURRENT content before overwriting — nothing is ever lost
@@ -582,7 +619,9 @@ Deno.serve(async (req) => {
         body: JSON.stringify({ opened_at: nowIso, force_closed: false, duration_minutes: dur }),
       });
       if (!r.ok) return json({ error: "Could not open" }, 500);
-      const endsAt = new Date(new Date(nowIso).getTime() + dur * 60000).toISOString();
+      // Overall end = opened_at + the longest clock (a per-question one may exceed the global).
+      const maxDur = maxDurationMinutes({ questions: quiz.questions, duration_minutes: dur });
+      const endsAt = new Date(new Date(nowIso).getTime() + maxDur * 60000).toISOString();
       return json({ ok: true, endsAt }, 200);
     }
 
@@ -617,11 +656,18 @@ Deno.serve(async (req) => {
     if (!quiz) return json({ error: "not_open", message: "Nenhum quiz aberto no momento." }, 423);
     const w = windowState(quiz);
     if (!w.isOpen) return json({ error: "not_open", message: "O quiz não está aberto no momento." }, 423);
+    // Give each question its own absolute deadline so the page can show a rolling
+    // clock and lock questions individually; endsAt (top level) is the last to close.
+    const openedMs = new Date(quiz.opened_at).getTime();
+    const questions = (Array.isArray(quiz.questions) ? quiz.questions : []).map((q: any) => ({
+      ...q,
+      endsAt: new Date(openedMs + qDurationMinutes(quiz, q.id) * 60000).toISOString(),
+    }));
     return json({
       ok: true,
       quiz: {
         id: quiz.id, title: quiz.title, description: quiz.description,
-        questions: quiz.questions, endsAt: w.endsAt,
+        questions, endsAt: w.endsAt, openedAt: quiz.opened_at,
       },
     }, 200);
   }
@@ -636,8 +682,13 @@ Deno.serve(async (req) => {
     }
     const quiz = await getQuiz(quizId);
     if (!quiz) return json({ error: "Quiz not found" }, 404);
-    const w = windowState(quiz);
-    if (!w.isOpen) return json({ error: "closed", message: "O tempo do quiz terminou." }, 423);
+    if (!questionOpen(quiz, questionId)) {
+      // scope="quiz" when the whole quiz is closed (force-closed or past the last
+      // deadline) so the page locks everything; "question" when only this one ended.
+      const scope = windowState(quiz).isOpen ? "question" : "quiz";
+      return json({ error: "closed", scope,
+        message: scope === "quiz" ? "O tempo do quiz terminou." : "O tempo desta questão terminou." }, 423);
+    }
 
     // anti-spam: throttle FREQUENCY per student (email), not per IP and not a
     // total cap — so classmates sharing one campus IP never throttle each other,
@@ -693,8 +744,10 @@ Deno.serve(async (req) => {
 
     const quiz = await getQuiz(quizId);
     if (!quiz) return json({ error: "Quiz not found" }, 404);
-    if (!windowState(quiz).isOpen) {
-      return json({ error: "closed", message: "O tempo do quiz terminou." }, 423);
+    if (!questionOpen(quiz, questionId)) {
+      const scope = windowState(quiz).isOpen ? "question" : "quiz";
+      return json({ error: "closed", scope,
+        message: scope === "quiz" ? "O tempo do quiz terminou." : "O tempo desta questão terminou." }, 423);
     }
 
     // throttle image uploads per student, and cap per question

@@ -22,6 +22,11 @@
     .desc { color:#444; font-size: 14px; line-height: 1.5; }
     .qtitle { font-size: 17px; font-weight: 500; margin: 0 0 6px; }
     .instr { font-size: 14px; color:#333; margin: 0 0 10px; line-height:1.5; }
+    .qhead { display:flex; align-items:center; gap:8px; margin:0 0 6px; }
+    .qnum { font-size:12px; font-weight:600; color:#5f6368; text-transform:uppercase; letter-spacing:.03em; }
+    .qclock { font-size:12px; font-weight:600; color:#174ea6; background:#e8f0fe; border-radius:10px; padding:1px 8px; font-variant-numeric:tabular-nums; }
+    .qclock.danger { color:#c5221f; background:#fce8e6; }
+    .qclock.closed { color:#5f6368; background:#f1f3f4; }
     .prompt { font-size: 15px; color:#202124; line-height:1.55; margin: 0 0 4px; }
     .prompt p { margin: 0 0 8px; }
     .prompt ul, .prompt ol { margin: 6px 0 8px; padding-left: 22px; }
@@ -123,8 +128,8 @@
   <script>
   (function () {
     const $ = (id) => document.getElementById(id);
-    let STUDENT = "", EMAIL = "", ENDS_AT = 0, LOCKED = false;
-    const state = {}; // questionId -> { dirty, saved, el }
+    let STUDENT = "", EMAIL = "", ENDS_AT = 0, LOCKED = false, DISTINCT_DEADLINES = 1;
+    const state = {}; // questionId -> { dirty, el, st, photos, endsAt, num, card, badge, locked }
 
     // ---------- math toolbar ----------
     const SYMBOLS = [
@@ -351,15 +356,32 @@
       $("qDesc").innerHTML = renderRich(quiz.description || "");
       ENDS_AT = new Date(quiz.endsAt).getTime();
 
+      // How many distinct question deadlines are there? If just one (the usual
+      // case, no per-question clocks), the banner stays a plain "Tempo restante".
+      // If several, it becomes a rolling clock that names the next question(s) to close.
+      DISTINCT_DEADLINES = new Set(
+        quiz.questions.map((q) => q.endsAt || quiz.endsAt)
+      ).size;
+
       const container = $("questions");
-      quiz.questions.forEach((q) => container.appendChild(buildQuestion(q)));
+      quiz.questions.forEach((q, i) => container.appendChild(buildQuestion(q, i + 1)));
 
       startTimer();
     }
 
-    function buildQuestion(q) {
+    function buildQuestion(q, num) {
       const card = document.createElement("div");
       card.className = "card";
+
+      // header: "Questão N" + (only when per-question clocks are in play) a small badge
+      const head = document.createElement("div");
+      head.className = "qhead";
+      const hlabel = document.createElement("span");
+      hlabel.className = "qnum"; hlabel.textContent = "Questão " + num;
+      const badge = document.createElement("span");
+      badge.className = "qclock hidden";
+      head.appendChild(hlabel); head.appendChild(badge);
+      card.appendChild(head);
 
       const prompt = document.createElement("div");
       prompt.className = "prompt";
@@ -421,7 +443,11 @@
       if (saved != null) { st.textContent = "Rascunho salvo localmente"; st.className = "save-state dirty"; }
       foot.appendChild(btn); foot.appendChild(st);
 
-      state[q.id] = { dirty: saved != null, el: ta, st, photos: [] };
+      state[q.id] = {
+        dirty: saved != null, el: ta, st, photos: [],
+        num, card, badge, locked: false,
+        endsAt: q.endsAt ? new Date(q.endsAt).getTime() : ENDS_AT,
+      };
 
       ta.addEventListener("input", () => {
         localStorage.setItem(lsKey(q.id), ta.value);
@@ -465,7 +491,7 @@
     }
 
     async function submitOne(qid, st, btn) {
-      if (LOCKED) return;
+      if (LOCKED || (state[qid] && state[qid].locked)) return;
       const s = state[qid], ta = s.el;
       st.textContent = "Enviando…"; st.className = "save-state";
       if (btn) btn.disabled = true;
@@ -482,7 +508,7 @@
             imageBase64, mimeType: item.blob.type || "image/webp",
           });
           if (res.ok && res.data.ok) item.id = res.data.id;
-          else if (res.status === 423) { lockQuiz("⏱ O tempo terminou — os envios estão fechados."); return; }
+          else if (res.status === 423) { on423(qid, res.data); return; }
           else failed++;
         } catch { failed++; }
       }
@@ -502,7 +528,7 @@
           : (imageIds.length ? `✓ Enviado com ${imageIds.length} foto(s)` : "✓ Enviado");
         st.className = failed ? "save-state err" : "save-state ok";
       } else if (status === 423) {
-        lockQuiz("O tempo terminou — os envios estão fechados.");
+        on423(qid, data);
       } else {
         st.textContent = "✗ " + (data.error || "Falha ao enviar"); st.className = "save-state err";
       }
@@ -513,20 +539,84 @@
       updateTimer();
       const iv = setInterval(() => { if (updateTimer()) clearInterval(iv); }, 1000);
     }
+    const mmss = (secs) =>
+      String(Math.floor(secs / 60)).padStart(2, "0") + ":" + String(secs % 60).padStart(2, "0");
+
+    // Turn a list of question numbers into "Questão 5" / "Questões 1–4" / "Questões 1, 3, 5".
+    function fmtNums(nums) {
+      nums = [...new Set(nums)].sort((a, b) => a - b);
+      if (nums.length === 1) return "Questão " + nums[0];
+      const contiguous = nums.every((n, i) => i === 0 || n === nums[i - 1] + 1);
+      const list = contiguous ? nums[0] + "–" + nums[nums.length - 1] : nums.join(", ");
+      return "Questões " + list;
+    }
+
     function updateTimer() {
       const banner = $("banner");
       banner.classList.remove("hidden");
-      const left = Math.max(0, Math.floor((ENDS_AT - Date.now()) / 1000));
-      if (left <= 0) {
+      const now = Date.now();
+
+      // lock any question whose own deadline has passed
+      for (const qid in state) {
+        if (!state[qid].locked && state[qid].endsAt - now <= 0) lockQuestion(qid);
+      }
+      const open = Object.keys(state).filter((qid) => !state[qid].locked);
+      if (!open.length) {
         lockQuiz("⏱ O tempo terminou — os envios estão fechados.");
         return true;
       }
-      const m = String(Math.floor(left / 60)).padStart(2, "0");
-      const s = String(left % 60).padStart(2, "0");
-      banner.style.background = left <= 120 ? "#fce8e6" : "#e8f0fe";
-      banner.style.color = left <= 120 ? "#c5221f" : "#174ea6";
-      banner.innerHTML = `Tempo restante: <span id="timer">${m}:${s}</span>`;
+
+      // count down to the NEXT deadline among still-open questions
+      const nextEnd = Math.min(...open.map((qid) => state[qid].endsAt));
+      const left = Math.max(0, Math.floor((nextEnd - now) / 1000));
+      const danger = left <= 120;
+      banner.style.background = danger ? "#fce8e6" : "#e8f0fe";
+      banner.style.color = danger ? "#c5221f" : "#174ea6";
+
+      if (DISTINCT_DEADLINES <= 1) {
+        banner.innerHTML = `Tempo restante: <span id="timer">${mmss(left)}</span>`;
+      } else {
+        // name the question(s) that close next, and keep a small live badge on each
+        const closingNext = open.filter((qid) => state[qid].endsAt === nextEnd);
+        const nums = closingNext.map((qid) => state[qid].num);
+        banner.innerHTML = `${fmtNums(nums)} — fecha em <span id="timer">${mmss(left)}</span>`;
+        for (const qid of open) {
+          const s = state[qid], qleft = Math.max(0, Math.floor((s.endsAt - now) / 1000));
+          s.badge.classList.remove("hidden");
+          s.badge.textContent = "⏱ " + mmss(qleft);
+          s.badge.classList.toggle("danger", qleft <= 120);
+        }
+      }
       return false;
+    }
+
+    // Close a SINGLE question: flush its unsent answer once, make it read-only,
+    // disable its controls, and mark it — the rest of the quiz stays active.
+    function lockQuestion(qid, note) {
+      const s = state[qid];
+      if (!s || s.locked) return;
+      s.locked = true;
+      if (s.dirty) {
+        api({
+          action: "submit", quizId: QUIZ_ID,
+          studentName: STUDENT, studentEmail: EMAIL, questionId: qid, answer: s.el.value,
+          imageIds: s.photos.filter((p) => p.id != null).map((p) => p.id),
+        }).then(({ ok, data }) => {
+          if (ok && data.ok) { s.st.textContent = "✓ Enviado (no fechamento)"; s.st.className = "save-state ok"; }
+        }).catch(() => {});
+        s.dirty = false;
+      }
+      s.el.setAttribute("readonly", "true");
+      s.card.querySelectorAll("button, input[type=file], .thumb-rm").forEach((el) => { el.disabled = true; });
+      s.badge.className = "qclock closed"; s.badge.textContent = "⏱ encerrada";
+      if (note && s.st && !s.st.className.includes("ok")) { s.st.textContent = note; s.st.className = "save-state err"; }
+    }
+
+    // A 423 on submit means "closed" — the server says whether the whole quiz
+    // ended (scope="quiz") or just this question (scope="question").
+    function on423(qid, data) {
+      if (data && data.scope === "quiz") lockQuiz("⏱ O tempo terminou — os envios estão fechados.");
+      else lockQuestion(qid, "⏱ Tempo desta questão encerrado");
     }
 
     async function lockQuiz(text) {
