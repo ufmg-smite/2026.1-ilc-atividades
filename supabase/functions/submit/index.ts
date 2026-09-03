@@ -27,6 +27,7 @@ const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Max-Age": "86400", // cache preflight so a background/keepalive flush isn't blocked
 };
 
 const SUPA_URL = Deno.env.get("SUPABASE_URL")!;
@@ -668,6 +669,7 @@ Deno.serve(async (req) => {
       quiz: {
         id: quiz.id, title: quiz.title, description: quiz.description,
         questions, endsAt: w.endsAt, openedAt: quiz.opened_at,
+        serverNow: new Date().toISOString(), // client uses this to correct a skewed device clock
       },
     }, 200);
   }

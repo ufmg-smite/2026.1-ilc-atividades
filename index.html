@@ -128,7 +128,7 @@
   <script>
   (function () {
     const $ = (id) => document.getElementById(id);
-    let STUDENT = "", EMAIL = "", ENDS_AT = 0, LOCKED = false, DISTINCT_DEADLINES = 1;
+    let STUDENT = "", EMAIL = "", ENDS_AT = 0, LOCKED = false, DISTINCT_DEADLINES = 1, CLOCK_OFFSET = 0;
     const state = {}; // questionId -> { dirty, el, st, photos, endsAt, num, card, badge, locked }
 
     // ---------- math toolbar ----------
@@ -200,7 +200,7 @@
     // network a plain fetch() can stall forever (a half-open connection never
     // errors), which is what left the page frozen on "Carregando…"/"Enviando…".
     // A timeout or network error resolves to {status:0} — the UI never hangs.
-    async function api(payload, { timeoutMs = 25000 } = {}) {
+    async function api(payload, { timeoutMs = 25000, keepalive = false } = {}) {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), timeoutMs);
       try {
@@ -209,6 +209,7 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
           signal: ctrl.signal,
+          keepalive, // let a background/close-time flush outlive the page
         });
         let data = {};
         try { data = await res.json(); } catch {}
@@ -222,6 +223,10 @@
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
     function lsKey(qid) { return `quiz:${QUIZ_ID}:${EMAIL.toLowerCase()}:${qid}`; }
+    // localStorage can THROW (Safari private mode: setItem; storage fully blocked:
+    // any access). Never let the draft cache break typing or the quiz render.
+    function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+    function safeSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
 
     // ---------- photo answers (compress hard, then upload) ----------
     async function compressImage(file) {
@@ -390,6 +395,9 @@
       $("qTitle").textContent = quiz.title;
       $("qDesc").innerHTML = renderRich(quiz.description || "");
       ENDS_AT = new Date(quiz.endsAt).getTime();
+      // Correct for a skewed device clock: all deadlines are absolute SERVER times,
+      // so compare them against (Date.now() + offset), not the raw phone clock.
+      CLOCK_OFFSET = quiz.serverNow ? new Date(quiz.serverNow).getTime() - Date.now() : 0;
 
       // How many distinct question deadlines are there? If just one (the usual
       // case, no per-question clocks), the banner stays a plain "Tempo restante".
@@ -440,7 +448,7 @@
       lab.className = "fld"; lab.textContent = "Sua resposta";
       card.appendChild(lab);
       ta.placeholder = "Digite sua resposta aqui…";
-      const saved = localStorage.getItem(lsKey(q.id));
+      const saved = safeGet(lsKey(q.id));
       if (saved != null) ta.value = saved;
       ["paste", "cut", "copy", "drop"].forEach((ev) =>
         ta.addEventListener(ev, (e) => e.preventDefault()));
@@ -485,7 +493,7 @@
       };
 
       ta.addEventListener("input", () => {
-        localStorage.setItem(lsKey(q.id), ta.value);
+        safeSet(lsKey(q.id), ta.value);
         prev.innerHTML = `<span class="plabel">Pré-visualização</span>` + renderRich(ta.value);
         state[q.id].dirty = true;
         if (!LOCKED) { st.textContent = "Alterações não enviadas"; st.className = "save-state dirty"; }
@@ -601,7 +609,7 @@
     function updateTimer() {
       const banner = $("banner");
       banner.classList.remove("hidden");
-      const now = Date.now();
+      const now = Date.now() + CLOCK_OFFSET;
 
       // lock any question whose own deadline has passed
       for (const qid in state) {
@@ -690,6 +698,33 @@
       document.querySelectorAll(".btn").forEach((b) => { if (b.id !== "startBtn") b.disabled = true; });
       document.querySelectorAll('input[type=file], .thumb-rm').forEach((el) => { el.disabled = true; });
     }
+
+    // Best-effort flush when the app is backgrounded or closed: a mobile browser
+    // may kill an in-flight request, so send any UNSENT answers with keepalive
+    // (the request survives the page going away). Fire-and-forget and additive —
+    // it never touches the UI or the dirty flag, so the normal "Enviar"/lock flow
+    // is unchanged; it only reduces the chance of losing edits made right before
+    // switching apps when the timer is about to expire.
+    let lastFlush = 0;
+    function flushDirty() {
+      if (LOCKED) return;
+      const nowT = Date.now();
+      if (nowT - lastFlush < 3000) return; // debounce rapid background/foreground toggles
+      lastFlush = nowT;
+      for (const qid in state) {
+        const s = state[qid];
+        if (s.locked || !s.dirty) continue;
+        api({
+          action: "submit", quizId: QUIZ_ID,
+          studentName: STUDENT, studentEmail: EMAIL, questionId: qid,
+          answer: s.el.value, imageIds: s.photos.filter((p) => p.id != null).map((p) => p.id),
+        }, { keepalive: true, timeoutMs: 8000 }).catch(() => {});
+      }
+    }
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") flushDirty();
+    });
+    window.addEventListener("pagehide", flushDirty);
 
     // ===== proof step helper (carry a formula forward with a law annotation) =====
     const LAWS = ["Identidade", "Dominância", "Idempotência", "Dupla negação",
