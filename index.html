@@ -196,16 +196,30 @@
     }
 
     // ---------- networking ----------
-    async function api(payload) {
-      const res = await fetch(FUNCTION_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      let data = {};
-      try { data = await res.json(); } catch {}
-      return { ok: res.ok, status: res.status, data };
+    // Every request has a hard timeout via AbortController: on a flaky mobile
+    // network a plain fetch() can stall forever (a half-open connection never
+    // errors), which is what left the page frozen on "Carregando…"/"Enviando…".
+    // A timeout or network error resolves to {status:0} — the UI never hangs.
+    async function api(payload, { timeoutMs = 25000 } = {}) {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const res = await fetch(FUNCTION_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          signal: ctrl.signal,
+        });
+        let data = {};
+        try { data = await res.json(); } catch {}
+        return { ok: res.ok, status: res.status, data };
+      } catch {
+        return { ok: false, status: 0, data: { error: "network", message: "Falha de conexão." } };
+      } finally {
+        clearTimeout(t);
+      }
     }
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
     function lsKey(qid) { return `quiz:${QUIZ_ID}:${EMAIL.toLowerCase()}:${qid}`; }
 
@@ -340,11 +354,32 @@
       if (!STUDENT) { msg.textContent = "Digite seu nome."; msg.className = "save-state err"; return; }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(EMAIL)) { msg.textContent = "Digite um e-mail válido."; msg.className = "save-state err"; return; }
       msg.textContent = "Carregando…"; msg.className = "save-state";
-      const { ok, status, data } = await api({ action: "load" });
-      if (ok && data.ok) { renderQuiz(data.quiz); return; }
-      if (status === 423) { msg.textContent = "O quiz ainda não está aberto. Aguarde o professor."; }
-      else { msg.textContent = data.error || "Erro ao carregar. Tente novamente."; }
-      msg.className = "save-state err";
+      loadQuiz(msg);
+    }
+
+    // Keep trying to load on its own: a network hiccup self-heals (short backoff),
+    // and while the quiz isn't open yet it polls, so it appears automatically when
+    // the teacher opens it — no "Tentar novamente" button, no reload needed.
+    // Re-clicking "Entrar" just refreshes the name/email (used only when submitting).
+    let loadingQuiz = false;
+    async function loadQuiz(msg) {
+      if (loadingQuiz) return;
+      loadingQuiz = true;
+      let attempt = 0;
+      while (true) {
+        const { ok, status, data } = await api({ action: "load" });
+        if (ok && data.ok) { loadingQuiz = false; renderQuiz(data.quiz); return; }
+        if (status === 423) {
+          msg.textContent = "O quiz ainda não está aberto. Aguardando o professor…";
+          msg.className = "save-state";
+        } else {
+          msg.textContent = "Sem conexão. Reconectando…";
+          msg.className = "save-state err";
+        }
+        attempt++;
+        const wait = attempt <= 3 ? [2000, 3000, 5000][attempt - 1] : (status === 423 ? 12000 : 8000);
+        await sleep(wait);
+      }
     }
 
     // ---------- render ----------
@@ -496,41 +531,53 @@
       st.textContent = "Enviando…"; st.className = "save-state";
       if (btn) btn.disabled = true;
 
-      // upload any staged photos not yet uploaded (a resend won't re-upload them)
-      let failed = 0;
-      for (const item of s.photos) {
-        if (item.id != null) continue;
-        try {
-          const imageBase64 = await blobToBase64(item.blob);
-          const res = await api({
-            action: "uploadImage", quizId: QUIZ_ID,
-            studentName: STUDENT, studentEmail: EMAIL, questionId: qid,
-            imageBase64, mimeType: item.blob.type || "image/webp",
-          });
-          if (res.ok && res.data.ok) item.id = res.data.id;
-          else if (res.status === 423) { on423(qid, res.data); return; }
-          else failed++;
-        } catch { failed++; }
-      }
+      try {
+        // upload any staged photos not yet uploaded (a resend won't re-upload them).
+        // Photos are the heaviest payload, so give the upload a longer leash than
+        // a text submit before it times out on a weak uplink.
+        let failed = 0;
+        for (const item of s.photos) {
+          if (item.id != null) continue;
+          try {
+            const imageBase64 = await blobToBase64(item.blob);
+            const res = await api({
+              action: "uploadImage", quizId: QUIZ_ID,
+              studentName: STUDENT, studentEmail: EMAIL, questionId: qid,
+              imageBase64, mimeType: item.blob.type || "image/webp",
+            }, { timeoutMs: 60000 });
+            if (res.ok && res.data.ok) item.id = res.data.id;
+            else if (res.status === 423) { on423(qid, res.data); return; }
+            else failed++;
+          } catch { failed++; }
+        }
 
-      const imageIds = s.photos.filter((p) => p.id != null).map((p) => p.id);
-      const { ok, status, data } = await api({
-        action: "submit", quizId: QUIZ_ID,
-        studentName: STUDENT, studentEmail: EMAIL, questionId: qid,
-        answer: ta.value, imageIds,
-      });
-      if (btn) btn.disabled = false;
-      if (ok && data.ok) {
-        s.dirty = false;
-        if (s.pst) { s.pst.textContent = ""; s.pst.className = "save-state"; }
-        st.textContent = failed
-          ? `✓ Enviado — ${failed} foto(s) falharam, tente de novo`
-          : (imageIds.length ? `✓ Enviado com ${imageIds.length} foto(s)` : "✓ Enviado");
-        st.className = failed ? "save-state err" : "save-state ok";
-      } else if (status === 423) {
-        on423(qid, data);
-      } else {
-        st.textContent = "✗ " + (data.error || "Falha ao enviar"); st.className = "save-state err";
+        const imageIds = s.photos.filter((p) => p.id != null).map((p) => p.id);
+        const { ok, status, data } = await api({
+          action: "submit", quizId: QUIZ_ID,
+          studentName: STUDENT, studentEmail: EMAIL, questionId: qid,
+          answer: ta.value, imageIds,
+        });
+        if (ok && data.ok) {
+          s.dirty = false;
+          if (s.pst) { s.pst.textContent = ""; s.pst.className = "save-state"; }
+          st.textContent = failed
+            ? `✓ Enviado — ${failed} foto(s) falharam, toque em Enviar para tentar de novo`
+            : (imageIds.length ? `✓ Enviado com ${imageIds.length} foto(s)` : "✓ Enviado");
+          st.className = failed ? "save-state err" : "save-state ok";
+        } else if (status === 423) {
+          on423(qid, data);
+        } else if (status === 0) {
+          // network/timeout — the draft is saved locally; the Enviar button stays
+          // available so the student just taps it again once the signal is back.
+          st.textContent = "Sem conexão — sua resposta está salva; toque em Enviar para tentar de novo.";
+          st.className = "save-state err";
+        } else {
+          st.textContent = "✗ " + (data.error || "Falha ao enviar"); st.className = "save-state err";
+        }
+      } finally {
+        // ALWAYS re-enable the button (unless this question/quiz got locked), so a
+        // failed or slow submit can never leave the UI frozen on "Enviando…".
+        if (btn && !LOCKED && !(state[qid] && state[qid].locked)) btn.disabled = false;
       }
     }
 
