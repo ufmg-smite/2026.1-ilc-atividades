@@ -524,7 +524,7 @@
       let treeView = false;
       const paintPreview = () => {
         if (treeView) {
-          const t = renderNDTree(ta.value);
+          const t = ta.value.trim() ? renderNDDoc(ta.value) : "";
           prev.innerHTML = t || '<span class="ndempty">Numere os passos (use “+ passo”) para desenhar a árvore.</span>';
         } else {
           prev.innerHTML = renderRich(ta.value);
@@ -802,18 +802,46 @@
     }
     function ndHypCount(text) { return (text.match(/\[\s*(?:hip|sup)\b/gi) || []).length; }
 
-    // Append a numbered step to the answer. A hypothesis gets an auto label
-    // (1,2,3…) so the tree can bracket it as [p]^1; a normal step carries the
-    // chosen rule + a slot for the line numbers it uses. Cursor lands in the $ $.
-    function ndAddLine(ta, rule, isSup) {
-      const val = ta.value.replace(/\s*$/, "");
-      const n = ndNextNum(val);
-      const just = isSup ? "hip " + (ndHypCount(val) + 1)
-        : (rule && rule !== "(regra)") ? rule + " " : "";
-      ta.value = (val ? val + "\n" : "") + `${n}. $  $   [${just}]`;
-      const pos = ta.value.lastIndexOf("$  $") + 2;
-      ta.focus(); ta.setSelectionRange(pos, pos);
+    // How many premises a rule cites (used to prefill the right number of refs).
+    function ndArity(rule) {
+      return { "→E": 2, "∧I": 2, "∧E": 1, "∨I": 1, "∨E": 3, "→I": 1, "¬I": 1,
+        "¬E": 2, "⊥E": 1, "RAA": 1, "∀I": 1, "∀E": 1, "∃I": 1, "∃E": 2,
+        "reit.": 1, "premissa": 0 }[rule] || 0;
+    }
+    // Insert `lineText` on its own line right AFTER the line the cursor is on
+    // (not at the end of the answer), then place the cursor at caretInLine.
+    function insertLineAfterCursor(ta, lineText, caretInLine) {
+      const val = ta.value;
+      const pos = ta.selectionStart != null ? ta.selectionStart : val.length;
+      let eol = val.indexOf("\n", pos); if (eol < 0) eol = val.length;
+      const prefix = eol > 0 ? "\n" : "";
+      ta.value = val.slice(0, eol) + prefix + lineText + val.slice(eol);
+      const caret = eol + prefix.length + (caretInLine != null ? caretInLine : lineText.length);
+      ta.focus(); ta.setSelectionRange(caret, caret);
       ta.dispatchEvent(new Event("input"));
+    }
+    // Add a numbered step after the cursor. A hypothesis gets an auto label
+    // (1,2,3…) so the tree brackets it as [p]^1; a normal step prefills the ref
+    // slot to the rule's arity, guessing the most recent lines before the cursor.
+    // The line number is the global max+1 (kept unique across blocks). Cursor → $ $.
+    function ndAddLine(ta, rule, isSup) {
+      const val = ta.value;
+      const pos = ta.selectionStart != null ? ta.selectionStart : val.length;
+      let eol = val.indexOf("\n", pos); if (eol < 0) eol = val.length;
+      const before = val.slice(0, eol);
+      const n = ndNextNum(val);
+      let just;
+      if (isSup) {
+        just = "hip " + (ndHypCount(val) + 1);
+      } else if (rule && rule !== "(regra)") {
+        const ar = ndArity(rule);
+        const prev = (before.match(/(?:^|\n)\s*\d+\./g) || []).map((s) => +s.match(/\d+/)[0]);
+        just = rule + (ar ? " " + prev.slice(-ar).join(",") : "");
+      } else {
+        just = "";
+      }
+      const lineText = `${n}. $  $   [${just}]`;
+      insertLineAfterCursor(ta, lineText, lineText.indexOf("$  $") + 2);
     }
 
     function ndFormula(f) {
@@ -857,11 +885,34 @@
         `<span class="nd-f">${f}</span><span class="nd-rule">${escapeHtml(ln.rule)}</span>` +
         `</td></tr></table>`;
     }
-    // Root = the last numbered line (the conclusion). Returns null if nothing parses.
-    function renderNDTree(text) {
-      const { lines, order } = ndParse(text);
-      if (!order.length) return null;
-      return `<div class="nd-wrap">${ndNode(order[order.length - 1], lines, new Set())}</div>`;
+    const ndIsProofLine = (l) => /^\s*\d+\.\s*[\s\S]*\[[^\]]*\]\s*$/.test(l);
+    // Render the WHOLE answer for árvore mode: free text stays text (rendered as
+    // usual), and each contiguous block of numbered proof lines becomes its own
+    // tree, drawn in place. Line numbers are global (unique across blocks), so a
+    // block's tree is rooted at its last line and its refs resolve anywhere.
+    function renderNDDoc(text) {
+      const { lines } = ndParse(text);
+      const raw = text.split("\n");
+      const out = [];
+      let buf = [], mode = null;
+      const flush = () => {
+        if (!buf.length) return;
+        if (mode === "proof") {
+          const nums = buf.map((l) => { const m = l.match(/^\s*(\d+)\./); return m ? +m[1] : null; })
+            .filter((x) => x != null);
+          out.push(`<div class="nd-wrap">${ndNode(nums[nums.length - 1], lines, new Set())}</div>`);
+        } else if (buf.join("").trim()) {
+          out.push(renderRich(buf.join("\n")));
+        }
+        buf = [];
+      };
+      for (const l of raw) {
+        const m = ndIsProofLine(l) ? "proof" : "text";
+        if (m !== mode) { flush(); mode = m; }
+        buf.push(l);
+      }
+      flush();
+      return out.join("");
     }
 
     // ===== proof step helper (carry a formula forward with a law annotation) =====
@@ -869,25 +920,24 @@
       "Comutatividade", "Associatividade", "Distributividade", "De Morgan",
       "Absorção", "Negação", "Implicação", "Contrapositiva", "Equivalência"];
 
-    // Copy the selected formula (or the last non-empty line) to a NEW line,
-    // prefixed with ≡ and annotated with the chosen law in parentheses, so the
-    // student edits only the part that changed — no retyping.
+    // Copy the selected formula (or the formula on the CURRENT line) to a NEW line
+    // right after the cursor, prefixed with ≡ and annotated with the chosen law,
+    // so the student edits only the part that changed — no retyping.
     function proofStep(ta, law) {
       const val = ta.value;
       let sel = val.substring(ta.selectionStart, ta.selectionEnd).trim();
       if (!sel) {
-        const lines = val.split("\n").map((s) => s.trim()).filter(Boolean);
-        sel = lines.length ? lines[lines.length - 1] : "";
+        const pos = ta.selectionStart != null ? ta.selectionStart : val.length;
+        const ls = val.lastIndexOf("\n", pos - 1) + 1;
+        let le = val.indexOf("\n", pos); if (le < 0) le = val.length;
+        sel = val.slice(ls, le).trim();
       }
       if (!sel) return;
       const m = sel.match(/\$([^$]+)\$/);            // formula = first $...$ if present
       const f = (m ? m[1] : sel).replace(/^(\\equiv|≡)\s*/, "").trim();
       const lei = (law && law !== "(sem lei)") ? ` (${law})` : "";
-      const base = val.replace(/\s*$/, "");
-      ta.value = (base ? base + "\n" : "") + `$\\equiv ${f}$${lei}`;
-      ta.focus();
-      ta.setSelectionRange(ta.value.length, ta.value.length);
-      ta.dispatchEvent(new Event("input"));
+      const lineText = `$\\equiv ${f}$${lei}`;
+      insertLineAfterCursor(ta, lineText, lineText.length);
     }
   })();
   </script>
