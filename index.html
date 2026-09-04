@@ -155,6 +155,7 @@
       { l: "∀", t: "\\forall " }, { l: "∃", t: "\\exists " },
       { l: "¬", t: "\\neg " }, { l: "∧", t: "\\land " }, { l: "∨", t: "\\lor " },
       { l: "→", t: "\\to " }, { l: "↔", t: "\\leftrightarrow " }, { l: "≡", t: "\\equiv " },
+      { l: "⊥", t: "\\bot " }, { l: "⊢", t: "\\vdash " },
       { l: "∈", t: "\\in " }, { l: "∉", t: "\\notin " },
       { l: "≥", t: "\\geq " }, { l: "≤", t: "\\leq " }, { l: "≠", t: "\\neq " },
       { l: "x²", t: "^{2}" }, { l: "xₙ", t: "_{n}" },
@@ -461,27 +462,27 @@
       });
       card.appendChild(tb);
 
-      // textarea (paste disabled)
+      // textarea (paste disabled) — created here but appended BELOW the helpers
       const lab = document.createElement("label");
       lab.className = "fld"; lab.textContent = "Sua resposta";
-      card.appendChild(lab);
       ta.placeholder = "Digite sua resposta aqui…";
       const saved = safeGet(lsKey(q.id));
       if (saved != null) ta.value = saved;
       ["paste", "cut", "copy", "drop"].forEach((ev) =>
         ta.addEventListener(ev, (e) => e.preventDefault()));
-      card.appendChild(ta);
 
       // proof step helper — carry a formula to a new line with the law in ( )
       const pstep = document.createElement("div");
       pstep.className = "pstep";
       const lawSel = document.createElement("select");
       ["(sem lei)"].concat(LAWS).forEach((l) => {
-        const o = document.createElement("option"); o.textContent = l; lawSel.appendChild(o);
+        const o = document.createElement("option"); o.textContent = l;
+        if (LAW_HELP[l]) o.title = LAW_HELP[l];
+        lawSel.appendChild(o);
       });
       const stepBtn = document.createElement("button");
       stepBtn.type = "button"; stepBtn.textContent = "≡ nova linha";
-      stepBtn.title = "Copia a fórmula selecionada (ou a última linha) para uma nova linha, com a lei entre parênteses";
+      stepBtn.title = "Copia a fórmula selecionada (ou a da linha atual) para uma nova linha após o cursor, com a lei entre parênteses";
       stepBtn.addEventListener("click", () => proofStep(ta, lawSel.value));
       pstep.appendChild(document.createTextNode("Demonstração:"));
       pstep.appendChild(lawSel);
@@ -499,7 +500,9 @@
       premBtn.addEventListener("click", () => ndAddLine(ta, "premissa", false));
       const ruleSel = document.createElement("select");
       ["(regra)"].concat(ND_RULES).forEach((r) => {
-        const o = document.createElement("option"); o.textContent = r; ruleSel.appendChild(o);
+        const o = document.createElement("option"); o.textContent = r;
+        if (ND_HELP[r]) o.title = ND_HELP[r];
+        ruleSel.appendChild(o);
       });
       const lineBtn = document.createElement("button");
       lineBtn.type = "button"; lineBtn.textContent = "+ passo";
@@ -510,9 +513,12 @@
       supBtn.title = "Hipótese temporária: descartada depois por →I, ¬I ou ∨E; aparece como [φ]ⁿ na árvore";
       supBtn.addEventListener("click", () => ndAddLine(ta, ruleSel.value, true));
       ndstep.appendChild(document.createTextNode("Dedução:"));
-      ndstep.appendChild(premBtn); ndstep.appendChild(ruleSel);
-      ndstep.appendChild(lineBtn); ndstep.appendChild(supBtn);
+      ndstep.appendChild(ruleSel); ndstep.appendChild(lineBtn);
+      ndstep.appendChild(premBtn); ndstep.appendChild(supBtn);
       card.appendChild(ndstep);
+
+      // the answer box sits below the two helper rows (which follow the toolbar)
+      card.appendChild(lab); card.appendChild(ta);
 
       // preview — with a linear <-> árvore (proof tree) toggle
       const pvhead = document.createElement("div");
@@ -797,8 +803,26 @@
     // Students type a numbered list (phone-friendly); each step cites the earlier
     // line numbers it uses, so we can draw the actual tree they see in class. The
     // stored answer is just this plain text — the LLM grader reads it directly.
-    const ND_RULES = ["→I", "→E", "∧I", "∧E", "∨I", "∨E",
-      "¬I", "¬E", "⊥E", "RAA", "∀I", "∀E", "∃I", "∃E", "reit."];
+    // The course's rule set (intro/elim of each connective + ⊥E). Traditional
+    // rules (modus ponens, silogismos, …) are these under other names.
+    const ND_RULES = ["→I", "→E", "∧I", "∧E_d", "∧E_e", "∨I", "∨E",
+      "¬I", "¬E", "⊥E", "∀I", "∀E", "∃I", "∃E"];
+    const ND_HELP = {
+      "→I": "Introdução da →: de uma subprova [A]…B, conclui A→B (descarta A)",
+      "→E": "Eliminação da → (modus ponens): de A→B e A, conclui B",
+      "∧I": "Introdução da ∧: de A e B, conclui A∧B",
+      "∧E_d": "Eliminação da ∧ (direita): de A∧B, conclui B",
+      "∧E_e": "Eliminação da ∧ (esquerda): de A∧B, conclui A",
+      "∨I": "Introdução da ∨: de A, conclui A∨B (ou B∨A)",
+      "∨E": "Eliminação da ∨ (prova por casos): de A∨B e subprovas [A]…C e [B]…C, conclui C",
+      "¬I": "Introdução da ¬: de uma subprova [A]…⊥, conclui ¬A (descarta A)",
+      "¬E": "Eliminação da ¬: de A e ¬A, conclui ⊥",
+      "⊥E": "Eliminação do ⊥ (explosão): de ⊥, conclui qualquer fórmula",
+      "∀I": "Introdução do ∀: de P(c) com c arbitrário, conclui ∀x.P(x)",
+      "∀E": "Eliminação do ∀ (instanciação): de ∀x.P(x), conclui P(c)",
+      "∃I": "Introdução do ∃ (generalização): de P(c), conclui ∃x.P(x)",
+      "∃E": "Eliminação do ∃: de ∃x.P(x) e subprova [P(c)]…C (c novo), conclui C",
+    };
 
     function ndNextNum(text) {
       let max = 0;
@@ -809,9 +833,9 @@
 
     // How many premises a rule cites (used to prefill the right number of refs).
     function ndArity(rule) {
-      return { "→E": 2, "∧I": 2, "∧E": 1, "∨I": 1, "∨E": 3, "→I": 1, "¬I": 1,
-        "¬E": 2, "⊥E": 1, "RAA": 1, "∀I": 1, "∀E": 1, "∃I": 1, "∃E": 2,
-        "reit.": 1, "premissa": 0 }[rule] || 0;
+      return { "→E": 2, "∧I": 2, "∧E_d": 1, "∧E_e": 1, "∨I": 1, "∨E": 3,
+        "→I": 1, "¬I": 1, "¬E": 2, "⊥E": 1, "∀I": 1, "∀E": 1, "∃I": 1, "∃E": 2,
+        "premissa": 0 }[rule] || 0;
     }
     // Insert `lineText` on its own line right AFTER the line the cursor is on
     // (not at the end of the answer), then place the cursor at caretInLine.
@@ -931,6 +955,21 @@
     const LAWS = ["Identidade", "Dominância", "Idempotência", "Dupla negação",
       "Comutatividade", "Associatividade", "Distributividade", "De Morgan",
       "Absorção", "Negação", "Implicação", "Contrapositiva", "Equivalência"];
+    const LAW_HELP = {
+      "Identidade": "A∧V ≡ A ; A∨F ≡ A",
+      "Dominância": "A∨V ≡ V ; A∧F ≡ F",
+      "Idempotência": "A∧A ≡ A ; A∨A ≡ A",
+      "Dupla negação": "¬¬A ≡ A",
+      "Comutatividade": "A∧B ≡ B∧A ; A∨B ≡ B∨A",
+      "Associatividade": "(A∧B)∧C ≡ A∧(B∧C) ; idem para ∨",
+      "Distributividade": "A∧(B∨C) ≡ (A∧B)∨(A∧C) ; A∨(B∧C) ≡ (A∨B)∧(A∨C)",
+      "De Morgan": "¬(A∧B) ≡ ¬A∨¬B ; ¬(A∨B) ≡ ¬A∧¬B",
+      "Absorção": "A∨(A∧B) ≡ A ; A∧(A∨B) ≡ A",
+      "Negação": "A∧¬A ≡ F ; A∨¬A ≡ V",
+      "Implicação": "A→B ≡ ¬A∨B",
+      "Contrapositiva": "A→B ≡ ¬B→¬A",
+      "Equivalência": "A↔B ≡ (A→B)∧(B→A)",
+    };
 
     // Copy the selected formula (or the formula on the CURRENT line) to a NEW line
     // right after the cursor, prefixed with ≡ and annotated with the chosen law,
