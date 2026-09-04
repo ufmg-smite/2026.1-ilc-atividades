@@ -493,20 +493,25 @@
       // numbers it uses. The preview can draw it as the class's Gentzen proof TREE.
       const ndstep = document.createElement("div");
       ndstep.className = "ndstep";
+      const premBtn = document.createElement("button");
+      premBtn.type = "button"; premBtn.textContent = "+ premissa";
+      premBtn.title = "Premissa: um dado do problema — folha do argumento, nunca descartada";
+      premBtn.addEventListener("click", () => ndAddLine(ta, "premissa", false));
       const ruleSel = document.createElement("select");
       ["(regra)"].concat(ND_RULES).forEach((r) => {
         const o = document.createElement("option"); o.textContent = r; ruleSel.appendChild(o);
       });
       const lineBtn = document.createElement("button");
       lineBtn.type = "button"; lineBtn.textContent = "+ passo";
-      lineBtn.title = "Novo passo numerado com a regra escolhida e um espaço para as linhas usadas";
+      lineBtn.title = "Passo de inferência com a regra escolhida, citando as linhas usadas";
       lineBtn.addEventListener("click", () => ndAddLine(ta, ruleSel.value, false));
       const supBtn = document.createElement("button");
       supBtn.type = "button"; supBtn.textContent = "+ hipótese";
-      supBtn.title = "Nova hipótese (descartada depois por →I, ¬I ou ∨E)";
+      supBtn.title = "Hipótese temporária: descartada depois por →I, ¬I ou ∨E; aparece como [φ]ⁿ na árvore";
       supBtn.addEventListener("click", () => ndAddLine(ta, ruleSel.value, true));
       ndstep.appendChild(document.createTextNode("Dedução:"));
-      ndstep.appendChild(ruleSel); ndstep.appendChild(lineBtn); ndstep.appendChild(supBtn);
+      ndstep.appendChild(premBtn); ndstep.appendChild(ruleSel);
+      ndstep.appendChild(lineBtn); ndstep.appendChild(supBtn);
       card.appendChild(ndstep);
 
       // preview — with a linear <-> árvore (proof tree) toggle
@@ -792,7 +797,7 @@
     // Students type a numbered list (phone-friendly); each step cites the earlier
     // line numbers it uses, so we can draw the actual tree they see in class. The
     // stored answer is just this plain text — the LLM grader reads it directly.
-    const ND_RULES = ["premissa", "→I", "→E", "∧I", "∧E", "∨I", "∨E",
+    const ND_RULES = ["→I", "→E", "∧I", "∧E", "∨I", "∨E",
       "¬I", "¬E", "⊥E", "RAA", "∀I", "∀E", "∃I", "∃E", "reit."];
 
     function ndNextNum(text) {
@@ -836,7 +841,10 @@
       } else if (rule && rule !== "(regra)") {
         const ar = ndArity(rule);
         const prev = (before.match(/(?:^|\n)\s*\d+\./g) || []).map((s) => +s.match(/\d+/)[0]);
-        just = rule + (ar ? " " + prev.slice(-ar).join(",") : "");
+        const g = prev.slice(-ar);
+        while (ar && g.length && g.length < ar) g.push(g[g.length - 1]); // pad to arity by repeating the last
+        const slots = ar ? (g.length ? g.join(",") : Array(ar).fill("").join(",")) : "";
+        just = rule + (ar ? " " + slots : "");
       } else {
         just = "";
       }
@@ -886,31 +894,35 @@
         `</td></tr></table>`;
     }
     const ndIsProofLine = (l) => /^\s*\d+\.\s*[\s\S]*\[[^\]]*\]\s*$/.test(l);
-    // Render the WHOLE answer for árvore mode: free text stays text (rendered as
-    // usual), and each contiguous block of numbered proof lines becomes its own
-    // tree, drawn in place. Line numbers are global (unique across blocks), so a
-    // block's tree is rooted at its last line and its refs resolve anywhere.
+    // Render the WHOLE answer for árvore mode: non-empty free text stays text, and
+    // each block of numbered proof lines becomes tree(s) in place. Blank lines do
+    // NOT split a block (only real text does); within a block we draw one tree per
+    // CONCLUSION — a numbered line not cited by any other — so a stray blank keeps
+    // one tree and two proofs sharing a block still draw as two (nothing is lost).
     function renderNDDoc(text) {
       const { lines } = ndParse(text);
-      const raw = text.split("\n");
       const out = [];
       let buf = [], mode = null;
       const flush = () => {
-        if (!buf.length) return;
         if (mode === "proof") {
-          const nums = buf.map((l) => { const m = l.match(/^\s*(\d+)\./); return m ? +m[1] : null; })
-            .filter((x) => x != null);
-          out.push(`<div class="nd-wrap">${ndNode(nums[nums.length - 1], lines, new Set())}</div>`);
+          const nums = [];
+          buf.forEach((l) => { const m = l.match(/^\s*(\d+)\./); if (m) nums.push(+m[1]); });
+          const refd = new Set();
+          nums.forEach((k) => (lines[k] ? lines[k].refs : []).forEach((r) => refd.add(r)));
+          const roots = nums.filter((k) => !refd.has(k));
+          (roots.length ? roots : nums.slice(-1)).forEach((r) =>
+            out.push(`<div class="nd-wrap">${ndNode(r, lines, new Set())}</div>`));
         } else if (buf.join("").trim()) {
           out.push(renderRich(buf.join("\n")));
         }
         buf = [];
       };
-      for (const l of raw) {
+      text.split("\n").forEach((l) => {
+        if (!l.trim()) { buf.push(l); return; }   // blank line stays in the current block
         const m = ndIsProofLine(l) ? "proof" : "text";
-        if (m !== mode) { flush(); mode = m; }
-        buf.push(l);
-      }
+        if (mode !== null && m !== mode) flush();
+        mode = m; buf.push(l);
+      });
       flush();
       return out.join("");
     }
