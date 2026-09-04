@@ -82,6 +82,24 @@
     .pstep select { font:inherit; padding:5px; border:1px solid var(--line); border-radius:6px; }
     .pstep button { background:#ede4fb; border:1px solid var(--line); border-radius:6px; padding:5px 10px; font-size:14px; cursor:pointer; }
     .pstep button:hover { background:#e0d2fb; }
+    /* ---- natural-deduction helper ---- */
+    .ndstep { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:4px; font-size:13px; color:#5f6368; }
+    .ndstep select { font:inherit; padding:5px; border:1px solid var(--line); border-radius:6px; }
+    .ndstep button { background:#e4f0fb; border:1px solid var(--line); border-radius:6px; padding:5px 10px; font-size:14px; cursor:pointer; }
+    .ndstep button:hover { background:#d2e6fb; }
+    .pvhead { display:flex; justify-content:space-between; align-items:center; margin:6px 0 2px; }
+    .plabel2 { font-size:11px; color:#9aa0a6; }
+    .pvtoggle { background:#f5f2fb; border:1px solid var(--line); border-radius:6px; padding:2px 9px; font-size:12px; cursor:pointer; }
+    .pvtoggle:hover { background:#ece4fb; }
+    .ndempty { color:#9aa0a6; font-size:13px; }
+    /* natural-deduction proof tree (nested tables; formulas via KaTeX) */
+    .nd-wrap { overflow-x:auto; padding:6px 2px; }
+    table.nd { border-collapse:collapse; margin:0 auto; }
+    table.nd td { text-align:center; vertical-align:bottom; padding:0 10px; }
+    td.nd-concl { border-top:1.3px solid #444; padding-top:2px; white-space:nowrap; }
+    .nd-rule { font-size:.72em; color:#666; margin-left:6px; vertical-align:.35em; }
+    .nd-leaf { display:inline-block; padding:0 4px; white-space:nowrap; }
+    .nd-blank, .nd-missing { color:#c5221f; }
   </style>
 </head>
 <body>
@@ -470,10 +488,54 @@
       pstep.appendChild(stepBtn);
       card.appendChild(pstep);
 
-      // preview
+      // natural-deduction helper — build a numbered proof: pick a rule, then "+ passo"
+      // (or "+ hipótese") appends a line with a slot for the formula and the line
+      // numbers it uses. The preview can draw it as the class's Gentzen proof TREE.
+      const ndstep = document.createElement("div");
+      ndstep.className = "ndstep";
+      const ruleSel = document.createElement("select");
+      ["(regra)"].concat(ND_RULES).forEach((r) => {
+        const o = document.createElement("option"); o.textContent = r; ruleSel.appendChild(o);
+      });
+      const lineBtn = document.createElement("button");
+      lineBtn.type = "button"; lineBtn.textContent = "+ passo";
+      lineBtn.title = "Novo passo numerado com a regra escolhida e um espaço para as linhas usadas";
+      lineBtn.addEventListener("click", () => ndAddLine(ta, ruleSel.value, false));
+      const supBtn = document.createElement("button");
+      supBtn.type = "button"; supBtn.textContent = "+ hipótese";
+      supBtn.title = "Nova hipótese (descartada depois por →I, ¬I ou ∨E)";
+      supBtn.addEventListener("click", () => ndAddLine(ta, ruleSel.value, true));
+      ndstep.appendChild(document.createTextNode("Dedução:"));
+      ndstep.appendChild(ruleSel); ndstep.appendChild(lineBtn); ndstep.appendChild(supBtn);
+      card.appendChild(ndstep);
+
+      // preview — with a linear <-> árvore (proof tree) toggle
+      const pvhead = document.createElement("div");
+      pvhead.className = "pvhead";
+      const plabel = document.createElement("span");
+      plabel.className = "plabel2"; plabel.textContent = "Pré-visualização";
+      const pvtoggle = document.createElement("button");
+      pvtoggle.type = "button"; pvtoggle.className = "pvtoggle"; pvtoggle.textContent = "🌳 árvore";
+      pvhead.appendChild(plabel); pvhead.appendChild(pvtoggle);
+      card.appendChild(pvhead);
+
       const prev = document.createElement("div");
       prev.className = "preview";
-      prev.innerHTML = `<span class="plabel">Pré-visualização</span>` + renderRich(ta.value);
+      let treeView = false;
+      const paintPreview = () => {
+        if (treeView) {
+          const t = renderNDTree(ta.value);
+          prev.innerHTML = t || '<span class="ndempty">Numere os passos (use “+ passo”) para desenhar a árvore.</span>';
+        } else {
+          prev.innerHTML = renderRich(ta.value);
+        }
+      };
+      pvtoggle.addEventListener("click", () => {
+        treeView = !treeView;
+        pvtoggle.textContent = treeView ? "📄 linear" : "🌳 árvore";
+        paintPreview();
+      });
+      paintPreview();
       card.appendChild(prev);
 
       // footer: submit + state
@@ -494,7 +556,7 @@
 
       ta.addEventListener("input", () => {
         safeSet(lsKey(q.id), ta.value);
-        prev.innerHTML = `<span class="plabel">Pré-visualização</span>` + renderRich(ta.value);
+        paintPreview();
         state[q.id].dirty = true;
         if (!LOCKED) { st.textContent = "Alterações não enviadas"; st.className = "save-state dirty"; }
       });
@@ -725,6 +787,82 @@
       if (document.visibilityState === "hidden") flushDirty();
     });
     window.addEventListener("pagehide", flushDirty);
+
+    // ===== natural-deduction helper: numbered linear input -> Gentzen proof tree =====
+    // Students type a numbered list (phone-friendly); each step cites the earlier
+    // line numbers it uses, so we can draw the actual tree they see in class. The
+    // stored answer is just this plain text — the LLM grader reads it directly.
+    const ND_RULES = ["premissa", "→I", "→E", "∧I", "∧E", "∨I", "∨E",
+      "¬I", "¬E", "⊥E", "RAA", "∀I", "∀E", "∃I", "∃E", "reit."];
+
+    function ndNextNum(text) {
+      let max = 0;
+      text.split("\n").forEach((l) => { const m = l.match(/^\s*(\d+)\./); if (m) max = Math.max(max, +m[1]); });
+      return max + 1;
+    }
+    function ndHypCount(text) { return (text.match(/\[\s*(?:hip|sup)\b/gi) || []).length; }
+
+    // Append a numbered step to the answer. A hypothesis gets an auto label
+    // (1,2,3…) so the tree can bracket it as [p]^1; a normal step carries the
+    // chosen rule + a slot for the line numbers it uses. Cursor lands in the $ $.
+    function ndAddLine(ta, rule, isSup) {
+      const val = ta.value.replace(/\s*$/, "");
+      const n = ndNextNum(val);
+      const just = isSup ? "hip " + (ndHypCount(val) + 1)
+        : (rule && rule !== "(regra)") ? rule + " " : "";
+      ta.value = (val ? val + "\n" : "") + `${n}. $  $   [${just}]`;
+      const pos = ta.value.lastIndexOf("$  $") + 2;
+      ta.focus(); ta.setSelectionRange(pos, pos);
+      ta.dispatchEvent(new Event("input"));
+    }
+
+    function ndFormula(f) {
+      f = (f || "").trim();
+      const m = f.match(/^\$([\s\S]*)\$$/); if (m) f = m[1].trim();
+      if (!f) return '<span class="nd-blank">▢</span>';
+      try { return katex.renderToString(f, { throwOnError: false, displayMode: false }); }
+      catch { return escapeHtml(f); }
+    }
+    // Parse "N. formula   [rule refs]" lines. Rule = first token; refs = the line
+    // numbers cited (the step's premises). premissa / empty / hip = a leaf.
+    function ndParse(text) {
+      const lines = {}; const order = [];
+      text.split("\n").forEach((raw) => {
+        const m = raw.match(/^\s*(\d+)\.\s*([\s\S]*?)\s*\[([^\]]*)\]\s*$/);
+        if (!m) return;
+        const num = +m[1], formula = m[2].trim(), just = m[3].trim();
+        const parts = just.split(/\s+/).filter(Boolean);
+        const rule = parts[0] || "";
+        const refs = (parts.slice(1).join(" ").match(/\d+/g) || []).map(Number);
+        const isSup = /^(hip|sup)/i.test(rule);
+        const isPrem = /^prem/i.test(rule) || rule === "";
+        lines[num] = { num, formula, rule, refs: (isSup || isPrem) ? [] : refs,
+          isSup, isPrem, label: isSup && refs.length ? refs[0] : null };
+        order.push(num);
+      });
+      return { lines, order };
+    }
+    function ndNode(num, lines, seen) {
+      const ln = lines[num];
+      if (!ln) return `<span class="nd-missing">?${num}</span>`;
+      const f = ndFormula(ln.formula);
+      if (ln.isSup) return `<span class="nd-leaf">[${f}]${ln.label != null ? `<sup>${ln.label}</sup>` : ""}</span>`;
+      if (ln.isPrem || !ln.refs.length) return `<span class="nd-leaf">${f}</span>`;
+      const seen2 = new Set(seen); seen2.add(num);
+      const cells = ln.refs.map((r) => seen2.has(r)
+        ? `<td class="nd-prem"><span class="nd-missing">↻${r}</span></td>`
+        : `<td class="nd-prem">${ndNode(r, lines, seen2)}</td>`).join("");
+      return `<table class="nd"><tr>${cells}</tr>` +
+        `<tr><td class="nd-concl" colspan="${ln.refs.length}">` +
+        `<span class="nd-f">${f}</span><span class="nd-rule">${escapeHtml(ln.rule)}</span>` +
+        `</td></tr></table>`;
+    }
+    // Root = the last numbered line (the conclusion). Returns null if nothing parses.
+    function renderNDTree(text) {
+      const { lines, order } = ndParse(text);
+      if (!order.length) return null;
+      return `<div class="nd-wrap">${ndNode(order[order.length - 1], lines, new Set())}</div>`;
+    }
 
     // ===== proof step helper (carry a formula forward with a law annotation) =====
     const LAWS = ["Identidade", "Dominância", "Idempotência", "Dupla negação",
