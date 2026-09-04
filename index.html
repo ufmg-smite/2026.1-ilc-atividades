@@ -92,6 +92,7 @@
     .pvtoggle { background:#f5f2fb; border:1px solid var(--line); border-radius:6px; padding:2px 9px; font-size:12px; cursor:pointer; }
     .pvtoggle:hover { background:#ece4fb; }
     .ndempty { color:#9aa0a6; font-size:13px; }
+    .helphint { font-size:12px; color:#5f6368; margin:1px 0 5px; min-height:14px; line-height:1.35; }
     /* natural-deduction proof tree (nested tables; formulas via KaTeX) */
     .nd-wrap { overflow-x:auto; padding:6px 2px; }
     table.nd { border-collapse:collapse; margin:0 auto; }
@@ -488,6 +489,12 @@
       pstep.appendChild(lawSel);
       pstep.appendChild(stepBtn);
       card.appendChild(pstep);
+      // live caption for the selected law (works on phones, where `title` hover doesn't)
+      const pHint = document.createElement("div");
+      pHint.className = "helphint";
+      const updPHint = () => { pHint.textContent = LAW_HELP[lawSel.value] || ""; };
+      lawSel.addEventListener("change", updPHint); updPHint();
+      card.appendChild(pHint);
 
       // natural-deduction helper — build a numbered proof: pick a rule, then "+ passo"
       // (or "+ hipótese") appends a line with a slot for the formula and the line
@@ -509,6 +516,12 @@
       ndstep.appendChild(document.createTextNode("Dedução:"));
       ndstep.appendChild(ruleSel); ndstep.appendChild(lineBtn);
       card.appendChild(ndstep);
+      // live caption for the selected rule (mobile-friendly replacement for hover)
+      const ndHint = document.createElement("div");
+      ndHint.className = "helphint";
+      const updNdHint = () => { ndHint.textContent = ND_HELP[ruleSel.value] || ""; };
+      ruleSel.addEventListener("change", updNdHint); updNdHint();
+      card.appendChild(ndHint);
 
       // the answer box sits below the two helper rows (which follow the toolbar)
       card.appendChild(lab); card.appendChild(ta);
