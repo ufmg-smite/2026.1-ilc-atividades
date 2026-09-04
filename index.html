@@ -494,27 +494,20 @@
       // numbers it uses. The preview can draw it as the class's Gentzen proof TREE.
       const ndstep = document.createElement("div");
       ndstep.className = "ndstep";
-      const premBtn = document.createElement("button");
-      premBtn.type = "button"; premBtn.textContent = "+ premissa";
-      premBtn.title = "Premissa: um dado do problema — folha do argumento, nunca descartada";
-      premBtn.addEventListener("click", () => ndAddLine(ta, "premissa", false));
+      // one dropdown (premissa / hipótese / an inference rule) + one button, so the
+      // row stays on a single line on phones.
       const ruleSel = document.createElement("select");
-      ["(regra)"].concat(ND_RULES).forEach((r) => {
+      ["(regra)", "premissa", "hipótese"].concat(ND_RULES).forEach((r) => {
         const o = document.createElement("option"); o.textContent = r;
         if (ND_HELP[r]) o.title = ND_HELP[r];
         ruleSel.appendChild(o);
       });
       const lineBtn = document.createElement("button");
-      lineBtn.type = "button"; lineBtn.textContent = "+ passo";
-      lineBtn.title = "Passo de inferência com a regra escolhida, citando as linhas usadas";
-      lineBtn.addEventListener("click", () => ndAddLine(ta, ruleSel.value, false));
-      const supBtn = document.createElement("button");
-      supBtn.type = "button"; supBtn.textContent = "+ hipótese";
-      supBtn.title = "Hipótese temporária: descartada depois por →I, ¬I ou ∨E; aparece como [φ]ⁿ na árvore";
-      supBtn.addEventListener("click", () => ndAddLine(ta, ruleSel.value, true));
+      lineBtn.type = "button"; lineBtn.textContent = "+ linha";
+      lineBtn.title = "Adiciona uma linha do tipo escolhido (premissa, hipótese, ou um passo de inferência)";
+      lineBtn.addEventListener("click", () => ndAddLine(ta, ruleSel.value, ruleSel.value === "hipótese"));
       ndstep.appendChild(document.createTextNode("Dedução:"));
       ndstep.appendChild(ruleSel); ndstep.appendChild(lineBtn);
-      ndstep.appendChild(premBtn); ndstep.appendChild(supBtn);
       card.appendChild(ndstep);
 
       // the answer box sits below the two helper rows (which follow the toolbar)
@@ -808,6 +801,8 @@
     const ND_RULES = ["→I", "→E", "∧I", "∧E_d", "∧E_e", "∨I", "∨E",
       "¬I", "¬E", "⊥E", "∀I", "∀E", "∃I", "∃E"];
     const ND_HELP = {
+      "premissa": "Premissa: um dado do problema — folha do argumento, nunca descartada",
+      "hipótese": "Hipótese temporária: descartada depois por →I, ¬I ou ∨E; aparece como [φ]ⁿ na árvore",
       "→I": "Introdução da →: de uma subprova [A]…B, conclui A→B (descarta A)",
       "→E": "Eliminação da → (modus ponens): de A→B e A, conclui B",
       "∧I": "Introdução da ∧: de A e B, conclui A∧B",
