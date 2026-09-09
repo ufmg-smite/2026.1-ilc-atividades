@@ -116,6 +116,8 @@
     .ndb-setup input { width:100%; padding:8px; border:1px solid var(--line); border-radius:6px; font-size:15px; }
     .ndb-setup .hint { font-size:12px; color:#9aa0a6; margin:8px 0; }
     .ndb-work { flex:1; display:flex; flex-direction:column; gap:8px; padding:12px 14px; overflow:auto; }
+    .ndb-header { font-size:14px; padding:4px 0 6px; border-bottom:1px solid var(--line); }
+    .ndb-hsep { color:#9aa0a6; font-size:12px; margin:0 4px; }
     .ndb-status { font-size:13px; color:#b06000; font-weight:600; }
     .ndb-status.done { color:var(--ok); }
     .ndb-tree { overflow:auto; padding:12px 4px; border:1px dashed var(--line); border-radius:6px; min-height:70px; }
@@ -1181,6 +1183,9 @@
       return null;
     }
     function ndbRenderWork() {
+      const premHtml = NDB.prem && NDB.prem.length ? NDB.prem.map((f) => ndbKt(f)).join(" , ") : "—";
+      ndbEls.header.innerHTML = `<b>Provar</b> ${NDB.goal ? ndbKt(NDB.goal) : ""}`
+        + `<span class="ndb-hsep">a partir de</span> ${premHtml}`;
       ndbEls.tree.innerHTML = ndbRenderNode(NDB.root);
       const open = ndbCountOpen(NDB.root);
       ndbEls.status.textContent = open ? `${open} objetivo(s) em aberto` : "✓ Prova completa";
@@ -1203,8 +1208,8 @@
     }
 
     // ---- undo / restart / export ----
-    function ndbSnapshot() { NDB.undo.push(JSON.stringify({ root: NDB.root, lc: NDB.labelCounter })); if (NDB.undo.length > 200) NDB.undo.shift(); }
-    function ndbUndo() { if (!NDB.undo.length) return; const s = JSON.parse(NDB.undo.pop()); NDB.root = s.root; NDB.labelCounter = s.lc; NDB.activeId = null; ndbRenderWork(); }
+    function ndbSnapshot() { NDB.undo.push(JSON.stringify({ root: NDB.root, lc: NDB.labelCounter, seq: NDB.nodeSeq })); if (NDB.undo.length > 200) NDB.undo.shift(); }
+    function ndbUndo() { if (!NDB.undo.length) return; const s = JSON.parse(NDB.undo.pop()); NDB.root = s.root; NDB.labelCounter = s.lc; NDB.nodeSeq = s.seq; NDB.activeId = null; ndbRenderWork(); }
     function ndbLinearize(node, lines, counter) {
       if (node.status === "closed") {
         const num = ++counter.n;
@@ -1244,6 +1249,7 @@
         const goal = ndbParseFormula(ndbEls.goal.value);
         const prems = ndbEls.prem.value.trim() ? ndbSplitTop(ndbEls.prem.value).map((s) => ndbParseFormula(s)) : [];
         NDB.labelCounter = 0; NDB.nodeSeq = 0; NDB.undo = []; NDB.activeId = null;
+        NDB.goal = goal; NDB.prem = prems;
         NDB.root = ndbMkNode(goal, prems.map((f) => ({ f, label: null, kind: "premissa" })));
         ndbEls.setup.hidden = true; ndbEls.work.hidden = false;
         ndbRenderWork();
@@ -1256,15 +1262,16 @@
         `<div class="ndb-box">
           <div class="ndb-head"><b>Construir prova — dedução natural (de cima para baixo)</b><button class="ndb-x" title="Fechar">✕</button></div>
           <div class="ndb-setup">
-            <label>Objetivo (o que você quer provar)</label>
-            <input class="ndb-goal" placeholder="ex.: q | r" autocomplete="off"/>
             <label>Premissas (separadas por vírgula)</label>
             <input class="ndb-prem" placeholder="ex.: p | q, ~p | r" autocomplete="off"/>
+            <label>Objetivo (o que você quer provar)</label>
+            <input class="ndb-goal" placeholder="ex.: q | r" autocomplete="off"/>
             <div class="hint">Conectivos: <code>~</code> ¬ · <code>&amp;</code> ou <code>/\\</code> ∧ · <code>|</code> ou <code>\\/</code> ∨ · <code>-&gt;</code> → · <code>#</code> ⊥. Clique num objetivo (laranja) e escolha uma regra.</div>
             <button class="ndb-start btn">Iniciar</button>
             <div class="ndb-setup-msg save-state"></div>
           </div>
           <div class="ndb-work" hidden>
+            <div class="ndb-header"></div>
             <div class="ndb-status"></div>
             <div class="ndb-tree"></div>
             <div class="ndb-menu" hidden></div>
@@ -1279,6 +1286,7 @@
       ndbEls = {
         ov, setup: ov.querySelector(".ndb-setup"), goal: ov.querySelector(".ndb-goal"), prem: ov.querySelector(".ndb-prem"),
         start: ov.querySelector(".ndb-start"), setupMsg: ov.querySelector(".ndb-setup-msg"), work: ov.querySelector(".ndb-work"),
+        header: ov.querySelector(".ndb-header"),
         status: ov.querySelector(".ndb-status"), tree: ov.querySelector(".ndb-tree"), menu: ov.querySelector(".ndb-menu"),
         undo: ov.querySelector(".ndb-undo"), restart: ov.querySelector(".ndb-restart"), export: ov.querySelector(".ndb-export"),
         x: ov.querySelector(".ndb-x"),
@@ -1287,7 +1295,10 @@
       ov.addEventListener("click", (e) => { if (e.target === ov) ndbClose(); });
       ndbEls.start.addEventListener("click", ndbStart);
       ndbEls.undo.addEventListener("click", ndbUndo);
-      ndbEls.restart.addEventListener("click", () => { ndbEls.work.hidden = true; ndbEls.menu.hidden = true; ndbEls.setup.hidden = false; });
+      ndbEls.restart.addEventListener("click", () => {
+        NDB.root = null; NDB.undo = []; ndbEls.tree.innerHTML = "";
+        ndbEls.work.hidden = true; ndbEls.menu.hidden = true; ndbEls.setup.hidden = false;
+      });
       ndbEls.export.addEventListener("click", ndbExport);
       ndbEls.tree.addEventListener("click", (e) => {
         const b = e.target.closest(".nd-hole"); if (!b) return;
@@ -1297,8 +1308,15 @@
     }
     function openNDBuilder(ta) {
       ndbEnsure();
-      NDB = { ta, root: null, labelCounter: 0, nodeSeq: 0, activeId: null, undo: [] };
-      ndbEls.setup.hidden = false; ndbEls.work.hidden = true; ndbEls.menu.hidden = true;
+      // Resume the in-progress proof if we're reopening the SAME question's builder.
+      if (NDB && NDB.ta === ta && NDB.root) {
+        ndbEls.setup.hidden = true; ndbEls.work.hidden = false;
+        ndbEls.ov.hidden = false; ndbRenderWork();
+        return;
+      }
+      NDB = { ta, root: null, goal: null, prem: [], labelCounter: 0, nodeSeq: 0, activeId: null, undo: [] };
+      ndbEls.tree.innerHTML = ""; ndbEls.menu.hidden = true;
+      ndbEls.setup.hidden = false; ndbEls.work.hidden = true;
       ndbEls.setupMsg.textContent = "";
       ndbEls.ov.hidden = false;
     }
