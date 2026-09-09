@@ -405,12 +405,18 @@
     $("startBtn").addEventListener("click", start);
     $("email").addEventListener("keydown", (e) => { if (e.key === "Enter") start(); });
 
+    // Prefill name/email from the last time (saved on start), so students don't retype.
+    const NAME_KEY = "ilc:student:name", EMAIL_KEY = "ilc:student:email";
+    { const n = safeGet(NAME_KEY); if (n) $("name").value = n;
+      const e = safeGet(EMAIL_KEY); if (e) $("email").value = e; }
+
     async function start() {
       STUDENT = $("name").value.trim();
       EMAIL = $("email").value.trim();
       const msg = $("loginMsg");
       if (!STUDENT) { msg.textContent = "Digite seu nome."; msg.className = "save-state err"; return; }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(EMAIL)) { msg.textContent = "Digite um e-mail válido."; msg.className = "save-state err"; return; }
+      safeSet(NAME_KEY, STUDENT); safeSet(EMAIL_KEY, EMAIL);
       msg.textContent = "Carregando…"; msg.className = "save-state";
       loadQuiz(msg);
     }
@@ -561,7 +567,7 @@
       ndbuild.className = "ndbuild";
       const ndbBtn = document.createElement("button");
       ndbBtn.type = "button"; ndbBtn.className = "ndbuild-btn";
-      ndbBtn.textContent = "⊞ Construir prova (árvore)";
+      ndbBtn.textContent = "⊞ Construir demonstração (árvore)";
       ndbBtn.title = "Abre um construtor de cima para baixo: clique nos objetivos e escolha as regras";
       ndbBtn.addEventListener("click", () => openNDBuilder(ta));
       ndbuild.appendChild(ndbBtn);
@@ -1146,15 +1152,15 @@
       const u = (x) => ndbFmt(x, "uni"), g = node.goal;
       switch (m.k) {
         case "close": return `✓ usar ${m.c.kind === "hip" ? "hipótese" : "premissa"}: ${u(m.c.f)}`;
-        case "andI": return `∧I — provar ${u(g.a)} e ${u(g.b)}`;
-        case "orIe": return `∨I — provar ${u(g.a)} (à esquerda)`;
-        case "orId": return `∨I — provar ${u(g.b)} (à direita)`;
-        case "impI": return `→I — supor ${u(g.a)}, provar ${u(g.b)}`;
-        case "notI": return `¬I — supor ${u(g.a)}, provar ⊥`;
-        case "botE": return `⊥E — provar ⊥ (absurdo), concluir ${u(g)}`;
+        case "andI": return `∧I — demonstrar ${u(g.a)} e ${u(g.b)}`;
+        case "orIe": return `∨I — demonstrar ${u(g.a)} (à esquerda)`;
+        case "orId": return `∨I — demonstrar ${u(g.b)} (à direita)`;
+        case "impI": return `→I — supor ${u(g.a)}, demonstrar ${u(g.b)}`;
+        case "notI": return `¬I — supor ${u(g.a)}, demonstrar ⊥`;
+        case "botE": return `⊥E — demonstrar ⊥ (absurdo), concluir ${u(g)}`;
         case "orE": return `∨E em ${u(m.on)} — casos: ${u(m.on.a)} / ${u(m.on.b)}`;
-        case "impE": return `→E com ${u(m.on)} — provar ${u(m.on.a)}`;
-        case "notE": return `¬E com ${u(m.on)} — provar ${u(m.on.a)}`;
+        case "impE": return `→E com ${u(m.on)} — demonstrar ${u(m.on.a)}`;
+        case "notE": return `¬E com ${u(m.on)} — demonstrar ${u(m.on.a)}`;
         case "andE": return `∧E de ${u(m.on)} — concluir ${u(g)}`;
       }
       return "?";
@@ -1195,11 +1201,11 @@
     }
     function ndbRenderWork() {
       const premHtml = NDB.prem && NDB.prem.length ? NDB.prem.map((f) => ndbKt(f)).join(" , ") : "—";
-      ndbEls.header.innerHTML = `<b>Provar</b> ${NDB.goal ? ndbKt(NDB.goal) : ""}`
+      ndbEls.header.innerHTML = `<b>Demonstrar</b> ${NDB.goal ? ndbKt(NDB.goal) : ""}`
         + `<span class="ndb-hsep">a partir de</span> ${premHtml}`;
       ndbEls.tree.innerHTML = ndbRenderNode(NDB.root);
       const open = ndbCountOpen(NDB.root);
-      ndbEls.status.textContent = open ? `${open} objetivo(s) em aberto` : "✓ Prova completa";
+      ndbEls.status.textContent = open ? `${open} objetivo(s) em aberto` : "✓ Demonstração completa";
       ndbEls.status.className = "ndb-status" + (open ? "" : " done");
       const node = NDB.activeId ? ndbFind(NDB.root, NDB.activeId) : null;
       if (node && node.status === "open") ndbRenderMenu(node);
@@ -1271,11 +1277,11 @@
       const ov = document.createElement("div"); ov.id = "ndbOverlay"; ov.hidden = true;
       ov.innerHTML =
         `<div class="ndb-box">
-          <div class="ndb-head"><b>Construir prova — dedução natural (de cima para baixo)</b><button class="ndb-x" title="Fechar">✕</button></div>
+          <div class="ndb-head"><b>Construir demonstração — dedução natural (de cima para baixo)</b><button class="ndb-x" title="Fechar">✕</button></div>
           <div class="ndb-setup">
             <label>Premissas (separadas por vírgula)</label>
             <input class="ndb-prem" placeholder="ex.: p | q, ~p | r" autocomplete="off"/>
-            <label>Objetivo (o que você quer provar)</label>
+            <label>Objetivo (o que você quer demonstrar)</label>
             <input class="ndb-goal" placeholder="ex.: q | r" autocomplete="off"/>
             <div class="hint">Conectivos: <code>~</code> ¬ · <code>&amp;</code> ou <code>/\\</code> ∧ · <code>|</code> ou <code>\\/</code> ∨ · <code>-&gt;</code> → · <code>#</code> ⊥. Clique num objetivo (laranja) e escolha uma regra.</div>
             <button class="ndb-start btn">Iniciar</button>
