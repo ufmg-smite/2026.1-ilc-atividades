@@ -124,6 +124,7 @@
     .nd-hole { background:#fff3e0; border:1px solid #f0a350; border-radius:6px; padding:3px 8px; cursor:pointer; font-size:15px; }
     .nd-hole.active { background:#ffe0b2; box-shadow:0 0 0 2px #f0a35066; }
     .nd-hole .hole-q { color:#e07a00; font-weight:700; margin-left:5px; }
+    .nd-case { font-size:.72em; color:#8a5313; background:#f7ecd9; border-radius:4px; padding:0 5px; margin-right:5px; }
     .ndb-menu { border:1px solid var(--line); border-radius:8px; padding:8px; background:#fafafa; }
     .ndb-menu-goal { font-size:13px; margin-bottom:3px; }
     .ndb-ctx { font-size:12px; color:#5f6368; margin-bottom:8px; }
@@ -1126,11 +1127,15 @@
         case "andI": node.rule = "∧I"; node.children = [mk(G.a, ctx), mk(G.b, ctx)]; break;
         case "orIe": node.rule = "∨I"; node.children = [mk(G.a, ctx)]; break;
         case "orId": node.rule = "∨I"; node.children = [mk(G.b, ctx)]; break;
-        case "impI": { const h = hyp(G.a); node.rule = "→I"; node.discharges = [h.label]; node.children = [mk(G.b, ctx.concat([h]))]; break; }
-        case "notI": { const h = hyp(G.a); node.rule = "¬I"; node.discharges = [h.label]; node.children = [mk(bot, ctx.concat([h]))]; break; }
+        case "impI": { const h = hyp(G.a); node.rule = "→I"; node.discharges = [h.label];
+          const c = mk(G.b, ctx.concat([h])); c.assume = h; node.children = [c]; break; }
+        case "notI": { const h = hyp(G.a); node.rule = "¬I"; node.discharges = [h.label];
+          const c = mk(bot, ctx.concat([h])); c.assume = h; node.children = [c]; break; }
         case "botE": node.rule = "⊥E"; node.children = [mk(bot, ctx)]; break;
         case "orE": { const h1 = hyp(m.on.a), h2 = hyp(m.on.b); node.rule = "∨E"; node.discharges = [h1.label, h2.label];
-          node.children = [mk(m.on, ctx), mk(G, ctx.concat([h1])), mk(G, ctx.concat([h2]))]; break; }
+          const c1 = mk(G, ctx.concat([h1])); c1.assume = h1;
+          const c2 = mk(G, ctx.concat([h2])); c2.assume = h2;
+          node.children = [mk(m.on, ctx), c1, c2]; break; }
         case "impE": node.rule = "→E"; node.children = [mk(m.on, ctx), mk(m.on.a, ctx)]; break;
         case "notE": node.rule = "¬E"; node.children = [mk(m.on.a, ctx), mk(m.on, ctx)]; break;
         case "andE": node.rule = ndbEq(m.on.a, G) ? "∧E_e" : "∧E_d"; node.children = [mk(m.on, ctx)]; break;
@@ -1147,7 +1152,7 @@
         case "impI": return `→I — supor ${u(g.a)}, provar ${u(g.b)}`;
         case "notI": return `¬I — supor ${u(g.a)}, provar ⊥`;
         case "botE": return `⊥E — provar ⊥ (absurdo), concluir ${u(g)}`;
-        case "orE": return `∨E em ${u(m.on)} — dividir em casos`;
+        case "orE": return `∨E em ${u(m.on)} — provar o objetivo em 2 casos: supondo ${u(m.on.a)} e supondo ${u(m.on.b)} (hipóteses descartadas automaticamente)`;
         case "impE": return `→E com ${u(m.on)} — provar ${u(m.on.a)}`;
         case "notE": return `¬E com ${u(m.on)} — provar ${u(m.on.a)}`;
         case "andE": return `∧E de ${u(m.on)} — concluir ${u(g)}`;
@@ -1164,8 +1169,10 @@
           : `<span class="nd-leaf">${ndbKt(node.goal)}</span>`;
       }
       if (node.status === "open") {
+        const tag = node.assume
+          ? `<span class="nd-case">supondo [${ndbKt(node.assume.f)}]<sup>${node.assume.label}</sup></span> ` : "";
         return `<button class="nd-hole${node.id === NDB.activeId ? " active" : ""}" data-nid="${node.id}">`
-          + `${ndbKt(node.goal)}<span class="hole-q">?</span></button>`;
+          + `${tag}${ndbKt(node.goal)}<span class="hole-q">?</span></button>`;
       }
       const cells = node.children.map((c) => `<td class="nd-prem">${ndbRenderNode(c)}</td>`).join("");
       const lab = node.rule + (node.discharges && node.discharges.length ? "," + node.discharges.join(",") : "");
