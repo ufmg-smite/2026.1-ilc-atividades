@@ -1083,6 +1083,22 @@
       if (hit) return { id, goal, ctx, status: "closed", closedBy: hit };
       return { id, goal, ctx, status: "open" };
     }
+    // All subformulas of the context. An elimination may target one nested inside
+    // a premise (e.g. the q∧r inside p→(q∧r)), which then becomes a sub-goal — this
+    // is what lets forward-style chains (∧E after →E, etc.) be built backwards.
+    function ndbSubs(f, acc) {
+      acc.push(f);
+      if (f.t === "not") ndbSubs(f.a, acc);
+      else if (f.t === "and" || f.t === "or" || f.t === "imp") { ndbSubs(f.a, acc); ndbSubs(f.b, acc); }
+      return acc;
+    }
+    function ndbCandidates(ctx) {
+      const seen = {}, out = [];
+      ctx.forEach((c) => ndbSubs(c.f, []).forEach((f) => {
+        const k = ndbFmt(f, "tex"); if (!(k in seen)) { seen[k] = 1; out.push(f); }
+      }));
+      return out;
+    }
     function ndbMoves(node) {
       const G = node.goal, ctx = node.ctx, moves = [];
       ctx.forEach((c) => { if (ndbEq(c.f, G)) moves.push({ k: "close", c }); });
@@ -1090,11 +1106,12 @@
       if (G.t === "or") { moves.push({ k: "orIe" }); moves.push({ k: "orId" }); }
       if (G.t === "imp") moves.push({ k: "impI" });
       if (G.t === "not") moves.push({ k: "notI" });
+      const cand = ndbCandidates(ctx);
+      cand.forEach((f) => { if (f.t === "or") moves.push({ k: "orE", on: f }); });
+      cand.forEach((f) => { if (f.t === "imp" && ndbEq(f.b, G)) moves.push({ k: "impE", on: f }); });
+      cand.forEach((f) => { if (f.t === "and" && (ndbEq(f.a, G) || ndbEq(f.b, G))) moves.push({ k: "andE", on: f }); });
+      if (G.t === "bot") cand.forEach((f) => { if (f.t === "not") moves.push({ k: "notE", on: f }); });
       if (G.t !== "bot") moves.push({ k: "botE" });
-      ctx.forEach((c) => { if (c.f.t === "or") moves.push({ k: "orE", on: c }); });
-      ctx.forEach((c) => { if (c.f.t === "imp" && ndbEq(c.f.b, G)) moves.push({ k: "impE", on: c }); });
-      if (G.t === "bot") ctx.forEach((c) => { if (c.f.t === "not") moves.push({ k: "notE", on: c }); });
-      ctx.forEach((c) => { if (c.f.t === "and" && (ndbEq(c.f.a, G) || ndbEq(c.f.b, G))) moves.push({ k: "andE", on: c }); });
       return moves;
     }
     function ndbApply(node, m) {
@@ -1110,11 +1127,11 @@
         case "impI": { const h = hyp(G.a); node.rule = "→I"; node.discharges = [h.label]; node.children = [mk(G.b, ctx.concat([h]))]; break; }
         case "notI": { const h = hyp(G.a); node.rule = "¬I"; node.discharges = [h.label]; node.children = [mk(bot, ctx.concat([h]))]; break; }
         case "botE": node.rule = "⊥E"; node.children = [mk(bot, ctx)]; break;
-        case "orE": { const h1 = hyp(m.on.f.a), h2 = hyp(m.on.f.b); node.rule = "∨E"; node.discharges = [h1.label, h2.label];
-          node.children = [mk(m.on.f, ctx), mk(G, ctx.concat([h1])), mk(G, ctx.concat([h2]))]; break; }
-        case "impE": node.rule = "→E"; node.children = [mk(m.on.f, ctx), mk(m.on.f.a, ctx)]; break;
-        case "notE": node.rule = "¬E"; node.children = [mk(m.on.f.a, ctx), mk(m.on.f, ctx)]; break;
-        case "andE": node.rule = ndbEq(m.on.f.a, G) ? "∧E_e" : "∧E_d"; node.children = [mk(m.on.f, ctx)]; break;
+        case "orE": { const h1 = hyp(m.on.a), h2 = hyp(m.on.b); node.rule = "∨E"; node.discharges = [h1.label, h2.label];
+          node.children = [mk(m.on, ctx), mk(G, ctx.concat([h1])), mk(G, ctx.concat([h2]))]; break; }
+        case "impE": node.rule = "→E"; node.children = [mk(m.on, ctx), mk(m.on.a, ctx)]; break;
+        case "notE": node.rule = "¬E"; node.children = [mk(m.on.a, ctx), mk(m.on, ctx)]; break;
+        case "andE": node.rule = ndbEq(m.on.a, G) ? "∧E_e" : "∧E_d"; node.children = [mk(m.on, ctx)]; break;
       }
       node.status = "rule";
     }
@@ -1128,10 +1145,10 @@
         case "impI": return `→I — supor ${u(g.a)}, provar ${u(g.b)}`;
         case "notI": return `¬I — supor ${u(g.a)}, provar ⊥`;
         case "botE": return `⊥E — provar ⊥ (absurdo), concluir ${u(g)}`;
-        case "orE": return `∨E em ${u(m.on.f)} — dividir em casos`;
-        case "impE": return `→E com ${u(m.on.f)} — provar ${u(m.on.f.a)}`;
-        case "notE": return `¬E com ${u(m.on.f)} — provar ${u(m.on.f.a)}`;
-        case "andE": return `∧E de ${u(m.on.f)} — concluir ${u(g)}`;
+        case "orE": return `∨E em ${u(m.on)} — dividir em casos`;
+        case "impE": return `→E com ${u(m.on)} — provar ${u(m.on.a)}`;
+        case "notE": return `¬E com ${u(m.on)} — provar ${u(m.on.a)}`;
+        case "andE": return `∧E de ${u(m.on)} — concluir ${u(g)}`;
       }
       return "?";
     }
