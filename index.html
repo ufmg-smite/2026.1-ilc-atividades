@@ -1152,7 +1152,7 @@
         case "impI": return `→I — supor ${u(g.a)}, provar ${u(g.b)}`;
         case "notI": return `¬I — supor ${u(g.a)}, provar ⊥`;
         case "botE": return `⊥E — provar ⊥ (absurdo), concluir ${u(g)}`;
-        case "orE": return `∨E em ${u(m.on)} — provar o objetivo em 2 casos: supondo ${u(m.on.a)} e supondo ${u(m.on.b)} (hipóteses descartadas automaticamente)`;
+        case "orE": return `∨E em ${u(m.on)} — casos: ${u(m.on.a)} / ${u(m.on.b)}`;
         case "impE": return `→E com ${u(m.on)} — provar ${u(m.on.a)}`;
         case "notE": return `¬E com ${u(m.on)} — provar ${u(m.on.a)}`;
         case "andE": return `∧E de ${u(m.on)} — concluir ${u(g)}`;
@@ -1169,8 +1169,12 @@
           : `<span class="nd-leaf">${ndbKt(node.goal)}</span>`;
       }
       if (node.status === "open") {
-        const tag = node.assume
-          ? `<span class="nd-case">supondo [${ndbKt(node.assume.f)}]<sup>${node.assume.label}</sup></span> ` : "";
+        // show ALL hypotheses currently in scope at this hole (not just the one
+        // introduced here), so an assumption stays visible as the branch deepens.
+        const hyps = node.ctx.filter((c) => c.kind === "hip");
+        const tag = hyps.length
+          ? `<span class="nd-case">supondo ${hyps.map((h) => `[${ndbKt(h.f)}]<sup>${h.label}</sup>`).join(", ")}</span> `
+          : "";
         return `<button class="nd-hole${node.id === NDB.activeId ? " active" : ""}" data-nid="${node.id}">`
           + `${tag}${ndbKt(node.goal)}<span class="hole-q">?</span></button>`;
       }
