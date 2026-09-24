@@ -604,13 +604,6 @@
        <td><button class="red" style="padding:4px 8px">×</button></td>`;
     tr.querySelector("button").onclick = () => { tr.remove(); updateRubTotal(); };
     tr.querySelector(".cp").oninput = updateRubTotal;
-    // Show the auto-generated id as the label is typed, unless the user set one.
-    const ck = tr.querySelector(".ck");
-    ck.dataset.touched = ck.value ? "1" : "";
-    ck.oninput = () => { ck.dataset.touched = ck.value.trim() ? "1" : ""; };
-    tr.querySelector(".cl").oninput = (e) => {
-      if (!ck.dataset.touched) ck.value = critSlug(e.target.value);
-    };
     tb.appendChild(tr);
     updateRubTotal();
   };
@@ -622,19 +615,20 @@
   }
   function readRubric() {
     // Keep any row the user actually touched (key OR label OR detail). The id is
-    // optional: derive it from the label, else a sequential slug — never drop a
-    // criterion just because its id was left blank.
+    // optional: an empty one becomes a short sequential slug (c1, c2, …); never
+    // drop a criterion just because its id was left blank.
     const rows = Array.from($("rubTable").querySelectorAll("tbody tr")).map((tr) => ({
       key: critSlug(tr.querySelector(".ck").value),
       label: tr.querySelector(".cl").value.trim(),
       detail: tr.querySelector(".cd").value.trim(),
       points: parseFloat(tr.querySelector(".cp").value) || 0,
     })).filter((c) => c.key || c.label || c.detail);
-    const used = new Set();
-    rows.forEach((c, i) => {
-      let k = c.key || critSlug(c.label) || `criterio_${i + 1}`;
-      let base = k, n = 2;
-      while (used.has(k)) k = `${base}_${n++}`;      // guarantee uniqueness
+    const used = new Set(rows.map((c) => c.key).filter(Boolean));
+    let n = 1;
+    rows.forEach((c) => {
+      if (c.key) return;
+      let k = `c${n++}`;
+      while (used.has(k)) k = `c${n++}`;             // skip any typed id like "c2"
       used.add(k); c.key = k;
     });
     return rows;
