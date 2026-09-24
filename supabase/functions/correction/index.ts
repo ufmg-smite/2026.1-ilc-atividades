@@ -398,33 +398,53 @@ Deno.serve(async (req) => {
           return json({ error: `Chave de critério inválida: ${c?.key}` }, 400);
         }
       }
-      // Criteria are never deleted, only deactivated — an old proposal must
-      // still be readable against the barème it was judged under.
-      const keep = new Set(p.criteria.map((c: any) => c.key));
-      const existing = await rows(
-        `correction_criteria?run_id=eq.${enc(runId)}&question_id=eq.${enc(qid)}&select=key,active`,
-      );
-      for (const e of existing) {
-        if (!keep.has(e.key) && e.active) {
-          await db(
-            `correction_criteria?run_id=eq.${enc(runId)}&question_id=eq.${enc(qid)}&key=eq.${enc(e.key)}`,
-            { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ active: false }) },
-          );
+      // Write the barème to this question — and to every SIBLING variant of the
+      // same question type. Questions are named "v<N>_<type>" (one per exam
+      // version); the 3 versions of a mould share ONE barème, so a save on any
+      // version is mirrored onto all "v*_<type>" siblings and stays in sync,
+      // without a separate duplication step. Each version keeps its own prompt
+      // and reference (only the criteria are shared).
+      const targets = [qid];
+      const m = qid.match(/^v\d+_(.+)$/);
+      if (m) {
+        const suffix = m[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const sibRe = new RegExp(`^v\\d+_${suffix}$`);
+        const allQ = await rows(`correction_questions?run_id=eq.${enc(runId)}&select=question_id`);
+        for (const r of allQ) {
+          const id = r.question_id as string;
+          if (id !== qid && sibRe.test(id)) targets.push(id);
         }
       }
-      const payload = p.criteria.map((c: any, i: number) => ({
-        run_id: runId, question_id: qid, key: c.key,
-        label: c.label || c.key, detail: c.detail || "",
-        points: Number(c.points) || 0, position: i, active: true,
-      }));
-      if (payload.length) {
-        const res = await db(`correction_criteria?on_conflict=run_id,question_id,key`, {
-          method: "POST",
-          headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) return json({ error: "Falha ao salvar critérios", detail: (await res.text()).slice(0, 200) }, 500);
+      // Criteria are never hard-deleted, only deactivated — an old proposal must
+      // still be readable against the barème it was judged under.
+      const keep = new Set(p.criteria.map((c: any) => c.key));
+      for (const tq of targets) {
+        const existing = await rows(
+          `correction_criteria?run_id=eq.${enc(runId)}&question_id=eq.${enc(tq)}&select=key,active`,
+        );
+        for (const e of existing) {
+          if (!keep.has(e.key) && e.active) {
+            await db(
+              `correction_criteria?run_id=eq.${enc(runId)}&question_id=eq.${enc(tq)}&key=eq.${enc(e.key)}`,
+              { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ active: false }) },
+            );
+          }
+        }
+        const payload = p.criteria.map((c: any, i: number) => ({
+          run_id: runId, question_id: tq, key: c.key,
+          label: c.label || c.key, detail: c.detail || "",
+          points: Number(c.points) || 0, position: i, active: true,
+        }));
+        if (payload.length) {
+          const res = await db(`correction_criteria?on_conflict=run_id,question_id,key`, {
+            method: "POST",
+            headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) return json({ error: "Falha ao salvar critérios", detail: (await res.text()).slice(0, 200) }, 500);
+        }
       }
+      return json({ ok: true, applied: targets.length }, 200);
     }
     return json({ ok: true }, 200);
   }
