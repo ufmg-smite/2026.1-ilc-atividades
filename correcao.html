@@ -46,7 +46,9 @@
 
     #scans { flex:1.15; min-width:0; background:#3c4043; overflow:auto; position:relative;
              display:flex; flex-direction:column; align-items:center; padding:10px; gap:10px; }
-    #scans img { max-width:100%; background:#fff; transform-origin: center center; }
+    #scans img { max-width:100%; background:#fff; transform-origin: center center;
+                 cursor:grab; user-select:none; -webkit-user-drag:none; }
+    #scans.grabbing, #scans.grabbing img { cursor:grabbing; }
     #scans .noimg { color:#bdc1c6; margin:auto; font-size:13px; text-align:center; padding:20px; }
     .imgtools { position:sticky; top:0; align-self:flex-end; display:flex; gap:6px; z-index:5; }
     .imgtools button { padding:4px 9px; font-size:12px; background:#5f6368cc; }
@@ -132,9 +134,10 @@
 
   <div id="scans">
     <div class="imgtools">
-      <button onclick="rotate()" title="r">↻</button>
-      <button onclick="zoom(0.2)">+</button>
-      <button onclick="zoom(-0.2)">−</button>
+      <button onclick="rotate()" title="girar (r)">↻</button>
+      <button onclick="zoom(0.2)" title="ampliar (+ / roda do mouse)">+</button>
+      <button onclick="zoom(-0.2)" title="reduzir (−)">−</button>
+      <button onclick="resetView()" title="ajustar (0)">⤢</button>
     </div>
     <div id="scanBody"></div>
   </div>
@@ -229,6 +232,9 @@
       <kbd>g</kbd><span>re-avaliar esta resposta com o modelo</span>
       <kbd>b</kbd><span>abrir o barema</span>
       <kbd>r</kbd><span>girar a imagem 90°</span>
+      <kbd>+</kbd><kbd>−</kbd><span>ampliar / reduzir (ou a roda do mouse)</span>
+      <kbd>0</kbd><span>ajustar a imagem (reset do zoom/posição)</span>
+      <kbd>arrastar</kbd><span>mover a imagem (segure e arraste)</span>
       <kbd>s</kbd><span>mostrar/ocultar a lista de alunos</span>
       <kbd>Esc</kbd><span>sair do campo de texto / fechar</span>
       <kbd>?</kbd><span>esta ajuda</span>
@@ -327,7 +333,7 @@
   // ---------- state ----------
   let RUN = null, QID = null, ITEMS = [], CRIT = [], QUESTION = null, IDX = 0;
   let score = 0, met = {}, manual = false, dirty = false;
-  let rot = 0, scale = 1;
+  let rot = 0, scale = 1, panX = 0, panY = 0;
   let signedAt = 0;   // signed URLs last 15 min; refresh before they lapse
 
   const round = (n) => Math.round(n * 100) / 100;
@@ -387,8 +393,9 @@
       return;
     }
     body.innerHTML = it.images.map((u) =>
-      `<img src="${escapeHtml(u)}" style="transform:rotate(${rot}deg) scale(${scale})"
+      `<img src="${escapeHtml(u)}" draggable="false"
             onerror="window.__imgFail && window.__imgFail()">`).join("");
+    applyTransform();
   }
 
   function render() {
@@ -434,7 +441,7 @@
     const it = cur();
     if (!it) return;
     met = {}; manual = false; dirty = false;
-    rot = 0; scale = 1;                       // a new scan starts unrotated
+    rot = 0; scale = 1; panX = 0; panY = 0;   // a new scan starts unrotated, unzoomed, centred
     if (it.decision) {
       score = Number(it.decision.score);
       met = Object.assign({}, it.decision.criteria || {});
@@ -696,8 +703,35 @@
   };
 
   // ---------- image tools ----------
-  window.rotate = function () { rot = (rot + 90) % 360; renderScans(); };
-  window.zoom = function (d) { scale = Math.max(0.3, Math.min(4, scale + d)); renderScans(); };
+  function applyTransform() {
+    const t = `translate(${panX}px, ${panY}px) rotate(${rot}deg) scale(${scale})`;
+    $("scanBody").querySelectorAll("img").forEach((im) => { im.style.transform = t; });
+  }
+  window.rotate = function () { rot = (rot + 90) % 360; applyTransform(); };
+  window.zoom = function (d) { scale = Math.max(0.3, Math.min(6, scale + d)); applyTransform(); };
+  window.resetView = function () { scale = 1; panX = 0; panY = 0; applyTransform(); };
+
+  // Drag to pan, wheel to zoom — so cramped handwriting can be inspected up close.
+  (function initScanViewer() {
+    const scans = $("scans");
+    let dragging = false, sx = 0, sy = 0;
+    scans.addEventListener("mousedown", (e) => {
+      if (e.button !== 0 || e.target.closest(".imgtools")) return;
+      dragging = true; sx = e.clientX - panX; sy = e.clientY - panY;
+      scans.classList.add("grabbing"); e.preventDefault();
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      panX = e.clientX - sx; panY = e.clientY - sy; applyTransform();
+    });
+    window.addEventListener("mouseup", () => { dragging = false; scans.classList.remove("grabbing"); });
+    scans.addEventListener("wheel", (e) => {
+      if (!$("scanBody").querySelector("img")) return;
+      e.preventDefault();
+      scale = Math.max(0.3, Math.min(6, scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+      applyTransform();
+    }, { passive: false });
+  })();
   window.openHelp = function () { $("helpOv").classList.remove("hidden"); };
   window.closeHelp = function () { $("helpOv").classList.add("hidden"); };
 
@@ -743,6 +777,9 @@
       case "g":          e.preventDefault(); await regrade(); break;
       case "b":          e.preventDefault(); openRubric(); break;
       case "r":          e.preventDefault(); rotate(); break;
+      case "+": case "=": e.preventDefault(); zoom(0.2); break;
+      case "-":          e.preventDefault(); zoom(-0.2); break;
+      case "0":          e.preventDefault(); resetView(); break;
       case "s":          e.preventDefault(); $("sidebar").classList.toggle("hidden"); break;
       case "?":          e.preventDefault(); openHelp(); break;
       default:
