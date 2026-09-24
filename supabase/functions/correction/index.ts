@@ -96,8 +96,11 @@ async function authStaff(
   return role ? { email, role } : { denied: true };
 }
 
-// Teachers may change state (barème, imports); monitors may grade and read.
-const TEACHER_ACTIONS = new Set(["saveRun", "importFromQuiz", "saveRubric", "proposeRubric"]);
+// Teachers own the run structure (create/import runs). Monitors are trusted
+// collaborators: besides grading, they may also build/edit the barème
+// (saveRubric/proposeRubric) — barème edits only re-price still-pending items,
+// never a committed human grade.
+const TEACHER_ACTIONS = new Set(["saveRun", "importFromQuiz"]);
 
 // ---------- rate limiting (same DB-backed scheme as the quiz function) ----------
 // This endpoint runs with "Verify JWT" off, so it is publicly reachable and does

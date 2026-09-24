@@ -197,7 +197,7 @@
     </div>
 
     <table id="rubTable">
-      <thead><tr><th style="width:150px">chave</th><th>rótulo</th><th>o que ganha o ponto</th>
+      <thead><tr><th style="width:150px">chave <span style="font-weight:400;color:#5f6368">(opcional)</span></th><th>rótulo</th><th>o que ganha o ponto</th>
         <th style="width:70px">pontos</th><th style="width:30px"></th></tr></thead>
       <tbody></tbody>
     </table>
@@ -597,24 +597,47 @@
     const tb = $("rubTable").querySelector("tbody");
     const tr = document.createElement("tr");
     tr.innerHTML =
-      `<td><input class="ck" value="${escapeHtml((c && c.key) || "")}" placeholder="slug_do_criterio"></td>
+      `<td><input class="ck" value="${escapeHtml((c && c.key) || "")}" placeholder="(automático)"></td>
        <td><input class="cl" value="${escapeHtml((c && c.label) || "")}"></td>
        <td><input class="cd" value="${escapeHtml((c && c.detail) || "")}"></td>
        <td><input class="cp pts" type="number" step="0.5" min="0" value="${(c && c.points) != null ? c.points : 1}"></td>
        <td><button class="red" style="padding:4px 8px">×</button></td>`;
     tr.querySelector("button").onclick = () => { tr.remove(); updateRubTotal(); };
     tr.querySelector(".cp").oninput = updateRubTotal;
+    // Show the auto-generated id as the label is typed, unless the user set one.
+    const ck = tr.querySelector(".ck");
+    ck.dataset.touched = ck.value ? "1" : "";
+    ck.oninput = () => { ck.dataset.touched = ck.value.trim() ? "1" : ""; };
+    tr.querySelector(".cl").oninput = (e) => {
+      if (!ck.dataset.touched) ck.value = critSlug(e.target.value);
+    };
     tb.appendChild(tr);
     updateRubTotal();
   };
 
+  function critSlug(s) {
+    return (s || "").trim().toLowerCase()
+      .normalize("NFD").replace(/[̀-ͯ]/g, "")     // strip accents
+      .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60);
+  }
   function readRubric() {
-    return Array.from($("rubTable").querySelectorAll("tbody tr")).map((tr) => ({
-      key: (tr.querySelector(".ck").value || "").trim().toLowerCase().replace(/[^a-z0-9_]/g, "_"),
+    // Keep any row the user actually touched (key OR label OR detail). The id is
+    // optional: derive it from the label, else a sequential slug — never drop a
+    // criterion just because its id was left blank.
+    const rows = Array.from($("rubTable").querySelectorAll("tbody tr")).map((tr) => ({
+      key: critSlug(tr.querySelector(".ck").value),
       label: tr.querySelector(".cl").value.trim(),
       detail: tr.querySelector(".cd").value.trim(),
       points: parseFloat(tr.querySelector(".cp").value) || 0,
-    })).filter((c) => c.key);
+    })).filter((c) => c.key || c.label || c.detail);
+    const used = new Set();
+    rows.forEach((c, i) => {
+      let k = c.key || critSlug(c.label) || `criterio_${i + 1}`;
+      let base = k, n = 2;
+      while (used.has(k)) k = `${base}_${n++}`;      // guarantee uniqueness
+      used.add(k); c.key = k;
+    });
+    return rows;
   }
   function updateRubTotal() {
     $("rubTotal").textContent = fmtScore(readRubric().reduce((a, c) => a + c.points, 0));
