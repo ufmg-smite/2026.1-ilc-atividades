@@ -49,8 +49,12 @@
     /* Fit the WHOLE page in view by default (max-height); zoom/pan from there. */
     #scanBody { flex:1 1 auto; min-height:0; width:100%; overflow:hidden;
                 display:flex; flex-direction:column; align-items:center; justify-content:flex-start; gap:10px; }
-    #scans img { max-width:100%; max-height:100%; object-fit:contain; background:#fff;
-                 transform-origin: center center; cursor:grab; user-select:none; -webkit-user-drag:none; }
+    #scans img { max-width:100%; background:#fff; display:block;
+                 cursor:grab; user-select:none; -webkit-user-drag:none; }
+    /* All pages live in one wrapper that is zoomed/panned/rotated as a unit, so
+       multi-page items scale together instead of overlapping. */
+    .scanWrap { width:100%; display:flex; flex-direction:column; align-items:center; gap:16px;
+                transform-origin: top center; }
     #scans.grabbing, #scans.grabbing img { cursor:grabbing; }
     #scans .noimg { color:#bdc1c6; margin:auto; font-size:13px; text-align:center; padding:20px; }
     .imgtools { position:absolute; top:12px; right:12px; display:flex; gap:6px; z-index:5; }
@@ -238,6 +242,7 @@
       <kbd>+</kbd><kbd>−</kbd><span>ampliar / reduzir (ou a roda do mouse)</span>
       <kbd>0</kbd><span>ajustar a imagem (reset do zoom/posição)</span>
       <kbd>arrastar</kbd><span>mover a imagem (segure e arraste)</span>
+      <kbd>Ctrl</kbd>+<kbd>← ↑ ↓ →</kbd><span>mover a imagem pelo teclado</span>
       <kbd>s</kbd><span>mostrar/ocultar a lista de alunos</span>
       <kbd>Esc</kbd><span>sair do campo de texto / fechar</span>
       <kbd>?</kbd><span>esta ajuda</span>
@@ -395,10 +400,10 @@
         : `<div class="noimg">Sem imagem para esta resposta.</div>`;
       return;
     }
-    body.innerHTML = it.images.map((u) =>
+    body.innerHTML = `<div class="scanWrap">` + it.images.map((u) =>
       `<img src="${escapeHtml(u)}" draggable="false"
-            onerror="window.__imgFail && window.__imgFail()">`).join("");
-    applyTransform();
+            onerror="window.__imgFail && window.__imgFail()">`).join("") + `</div>`;
+    scheduleFit();
   }
 
   function render() {
@@ -707,12 +712,28 @@
 
   // ---------- image tools ----------
   function applyTransform() {
-    const t = `translate(${panX}px, ${panY}px) rotate(${rot}deg) scale(${scale})`;
-    $("scanBody").querySelectorAll("img").forEach((im) => { im.style.transform = t; });
+    const w = $("scanBody").querySelector(".scanWrap");
+    if (w) w.style.transform = `translate(${panX}px, ${panY}px) rotate(${rot}deg) scale(${scale})`;
   }
+  function fitToView() {                          // whole first page visible, centred
+    const w = $("scanBody").querySelector(".scanWrap");
+    const first = w && w.querySelector("img");
+    panX = 0; panY = 0;
+    scale = (first && first.clientHeight)
+      ? (Math.min(1, $("scanBody").clientHeight / first.clientHeight) || 1) : 1;
+    applyTransform();
+  }
+  function scheduleFit() {                         // fit once the first image knows its size
+    const first = $("scanBody").querySelector("img");
+    if (!first) { applyTransform(); return; }
+    const go = () => requestAnimationFrame(fitToView);
+    if (first.complete && first.naturalHeight) go();
+    else first.addEventListener("load", go, { once: true });
+  }
+  function pan(dx, dy) { panX += dx; panY += dy; applyTransform(); }
   window.rotate = function () { rot = (rot + 90) % 360; applyTransform(); };
   window.zoom = function (d) { scale = Math.max(0.3, Math.min(6, scale + d)); applyTransform(); };
-  window.resetView = function () { scale = 1; panX = 0; panY = 0; applyTransform(); };
+  window.resetView = function () { fitToView(); };
 
   // Drag to pan, wheel to zoom — so cramped handwriting can be inspected up close.
   (function initScanViewer() {
@@ -772,10 +793,10 @@
 
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     switch (k) {
-      case "ArrowUp":    e.preventDefault(); bumpScore(0.5); break;
-      case "ArrowDown":  e.preventDefault(); bumpScore(-0.5); break;
-      case "ArrowLeft":  e.preventDefault(); go(-1); break;
-      case "ArrowRight": e.preventDefault(); go(1); break;
+      case "ArrowUp":    e.preventDefault(); if (e.ctrlKey || e.metaKey) pan(0, 100); else bumpScore(0.5); break;
+      case "ArrowDown":  e.preventDefault(); if (e.ctrlKey || e.metaKey) pan(0, -100); else bumpScore(-0.5); break;
+      case "ArrowLeft":  e.preventDefault(); if (e.ctrlKey || e.metaKey) pan(100, 0); else go(-1); break;
+      case "ArrowRight": e.preventDefault(); if (e.ctrlKey || e.metaKey) pan(-100, 0); else go(1); break;
       case "Enter":      e.preventDefault(); await commit(); break;
       case "e":          e.preventDefault(); $("justif").focus(); break;
       case "t":          e.preventDefault(); $("transc").focus(); break;
