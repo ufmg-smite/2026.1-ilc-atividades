@@ -197,7 +197,7 @@
     </div>
 
     <table id="rubTable">
-      <thead><tr><th style="width:150px">chave <span style="font-weight:400;color:#5f6368">(opcional)</span></th><th>rótulo</th><th>o que ganha o ponto</th>
+      <thead><tr><th>rótulo</th><th>o que ganha o ponto</th>
         <th style="width:70px">pontos</th><th style="width:30px"></th></tr></thead>
       <tbody></tbody>
     </table>
@@ -596,9 +596,9 @@
   window.addCrit = function (c) {
     const tb = $("rubTable").querySelector("tbody");
     const tr = document.createElement("tr");
+    tr.dataset.key = (c && c.key) || "";     // preserve an existing id; new rows get one at save
     tr.innerHTML =
-      `<td><input class="ck" value="${escapeHtml((c && c.key) || "")}" placeholder="(automático)"></td>
-       <td><input class="cl" value="${escapeHtml((c && c.label) || "")}"></td>
+      `<td><input class="cl" value="${escapeHtml((c && c.label) || "")}"></td>
        <td><input class="cd" value="${escapeHtml((c && c.detail) || "")}"></td>
        <td><input class="cp pts" type="number" step="0.5" min="0" value="${(c && c.points) != null ? c.points : 1}"></td>
        <td><button class="red" style="padding:4px 8px">×</button></td>`;
@@ -608,17 +608,12 @@
     updateRubTotal();
   };
 
-  function critSlug(s) {
-    return (s || "").trim().toLowerCase()
-      .normalize("NFD").replace(/[̀-ͯ]/g, "")     // strip accents
-      .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60);
-  }
   function readRubric() {
-    // Keep any row the user actually touched (key OR label OR detail). The id is
-    // optional: an empty one becomes a short sequential slug (c1, c2, …); never
-    // drop a criterion just because its id was left blank.
+    // The criterion id is internal and not editable: an existing one is preserved
+    // (kept on the row), a new row gets a short sequential id (c1, c2, …) on save.
+    // Rows with a label or detail are kept; fully-empty rows are dropped.
     const rows = Array.from($("rubTable").querySelectorAll("tbody tr")).map((tr) => ({
-      key: critSlug(tr.querySelector(".ck").value),
+      key: (tr.dataset.key || "").trim(),
       label: tr.querySelector(".cl").value.trim(),
       detail: tr.querySelector(".cd").value.trim(),
       points: parseFloat(tr.querySelector(".cp").value) || 0,
@@ -628,7 +623,7 @@
     rows.forEach((c) => {
       if (c.key) return;
       let k = `c${n++}`;
-      while (used.has(k)) k = `c${n++}`;             // skip any typed id like "c2"
+      while (used.has(k)) k = `c${n++}`;
       used.add(k); c.key = k;
     });
     return rows;
