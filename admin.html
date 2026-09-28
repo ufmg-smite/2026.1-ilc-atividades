@@ -120,7 +120,7 @@
     <label>Descrição (Markdown, opcional)</label>
     <textarea id="qdesc" placeholder="Instruções gerais…"></textarea>
     <label>Duração (minutos)</label>
-    <input id="qdur" type="number" value="30" min="1" />
+    <input id="qdur" type="number" value="480" min="1" />
 
     <div id="questions"></div>
     <div class="row">
@@ -175,6 +175,9 @@
     // ---------- Supabase Auth (Google login) ----------
     const SESS_LS = "ilc-supa-session";
     let ROLE = null; // "teacher" | "monitor" | null
+    // Defaults for a NEW quiz (still editable in the form).
+    const DEFAULT_DESC = "Esta é uma atividade prática individual sobre o conteúdo visto em aula.  Tente resolver todas as questões e explique brevemente seu raciocínio quando necessário. As respostas não precisam estar perfeitas, mas devem apresentar uma tentativa séria e indicar o que você compreendeu ou onde encontrou dificuldade.";
+    const DEFAULT_DUR = 480;
     const loadSession = () => { try { return JSON.parse(localStorage.getItem(SESS_LS) || "null"); } catch { return null; } };
     const saveSession = (s) => localStorage.setItem(SESS_LS, JSON.stringify(s));
     const clearSession = () => localStorage.removeItem(SESS_LS);
@@ -604,14 +607,14 @@
         $("qid").value = q.id; $("qid").disabled = false;
         $("qtitle").value = q.title || "";
         $("qdesc").value = q.description || "";
-        $("qdur").value = q.durationMinutes || 30;
+        $("qdur").value = q.durationMinutes || DEFAULT_DUR;
         (q.questions || []).forEach((qq) => addQuestion(qq.id, qq.prompt, qq.durationMinutes));
         if (!q.questions || !q.questions.length) addQuestion("q1", "");
       } else {
         $("editTitle").textContent = "Novo quiz";
         editingOriginalId = null;
         $("qid").value = ""; $("qid").disabled = false;
-        $("qtitle").value = ""; $("qdesc").value = ""; $("qdur").value = 30;
+        $("qtitle").value = ""; $("qdesc").value = DEFAULT_DESC; $("qdur").value = DEFAULT_DUR;
         addQuestion("q1", "");
       }
       $("editor").classList.remove("hidden");
@@ -672,7 +675,7 @@
         originalId: editingOriginalId, // null for a new quiz -> must not clobber an existing id
         title: $("qtitle").value.trim(),
         description: $("qdesc").value,
-        durationMinutes: parseInt($("qdur").value, 10) || 30,
+        durationMinutes: parseInt($("qdur").value, 10) || DEFAULT_DUR,
         questions: collectQuestions(),
       });
       if (ok && data.ok) {
