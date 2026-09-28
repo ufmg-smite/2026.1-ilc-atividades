@@ -401,6 +401,39 @@
       thumbs.appendChild(wrap);
     }
 
+    // Photos that were successfully SENT are remembered on THIS device (a small
+    // thumbnail + the server id), so a page refresh shows them as saved instead
+    // of an empty slot. Kept per-device (localStorage) — the platform has no
+    // student login, so we never expose one student's photos to another.
+    function phKey(qid) { return lsKey(qid) + ":ph"; }
+    async function makeThumb(blob) {
+      try {
+        const url = URL.createObjectURL(blob);
+        const img = await new Promise((res, rej) => {
+          const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = url;
+        });
+        const s = Math.min(1, 220 / Math.max(img.width, img.height));
+        const c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(img.width * s));
+        c.height = Math.max(1, Math.round(img.height * s));
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        return c.toDataURL("image/webp", 0.5);
+      } catch { return ""; }
+    }
+    async function persistSent(qid) {
+      try {
+        const out = [];
+        for (const p of state[qid].photos) {
+          if (p.id == null) continue;                 // only actually-sent photos
+          if (!p.thumb) p.thumb = p.blob ? await makeThumb(p.blob)
+                                         : (String(p.url).startsWith("data:") ? p.url : "");
+          out.push({ id: p.id, thumb: p.thumb || "" });
+        }
+        safeSet(phKey(qid), out.length ? JSON.stringify(out) : "");
+      } catch {}
+    }
+
     // ---------- start ----------
     $("startBtn").addEventListener("click", start);
     $("email").addEventListener("keydown", (e) => { if (e.key === "Enter") start(); });
@@ -657,6 +690,24 @@
       photos.appendChild(plab); photos.appendChild(phint);
       photos.appendChild(fileInput); photos.appendChild(pstatus); photos.appendChild(thumbs);
       card.appendChild(photos);
+
+      // Restore photos already SENT from this device, so a refresh shows them as
+      // saved (with the sent status) instead of an empty slot.
+      try {
+        const sent = JSON.parse(safeGet(phKey(q.id)) || "[]");
+        for (const ph of sent) {
+          if (ph.id == null) continue;
+          const item = { blob: null, url: ph.thumb || "", id: ph.id, thumb: ph.thumb || "" };
+          state[q.id].photos.push(item);
+          renderThumb(q.id, item, thumbs);
+        }
+        if (sent.length) {
+          st.textContent = `✓ Enviado com ${sent.length} foto(s)`;
+          st.className = "save-state ok";
+          state[q.id].dirty = false;
+        }
+      } catch {}
+
       card.appendChild(foot); // Enviar button sits below the photos
 
       return card;
@@ -701,6 +752,7 @@
             ? `✓ Enviado — ${failed} foto(s) falharam, toque em Enviar para tentar de novo`
             : (imageIds.length ? `✓ Enviado com ${imageIds.length} foto(s)` : "✓ Enviado");
           st.className = failed ? "save-state err" : "save-state ok";
+          await persistSent(qid);   // remember sent photos so a refresh shows them as saved
         } else if (status === 423) {
           on423(qid, data);
         } else if (status === 0) {
