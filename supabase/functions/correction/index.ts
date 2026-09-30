@@ -538,7 +538,13 @@ Deno.serve(async (req) => {
     const lastProp: Record<string, any> = {};
     for (const r of props) lastProp[r.item_id] = r;
     const lastEv: Record<string, any> = {};
-    for (const r of evs) if (r.kind === "accept" || r.kind === "override") lastEv[r.item_id] = r;
+    // events are created_at.asc, so the last accept/override wins — unless a
+    // later 'reopen' removes the grade again (item goes back to pending). All
+    // rows are kept; this only decides which one is the CURRENT decision.
+    for (const r of evs) {
+      if (r.kind === "accept" || r.kind === "override") lastEv[r.item_id] = r;
+      else if (r.kind === "reopen") delete lastEv[r.item_id];
+    }
 
     // sign every scan in one batch call (15 min), like the quiz export does
     const allPaths = items.flatMap((i: any) => i.image_paths || []);

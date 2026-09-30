@@ -170,6 +170,8 @@
         <span class="scoremax" id="scoreMax"></span>
         <span class="spacer"></span>
         <span class="badge" id="stateBadge">pendente</span>
+        <button class="ghost" onclick="reopenItem()" title="remover a nota / reabrir (x)"
+                style="padding:3px 8px;font-size:12px">✕ nota</button>
       </div>
       <div id="msg"></div>
     </div>
@@ -251,6 +253,7 @@
       <kbd>arrastar</kbd><span>mover a imagem (segure e arraste)</span>
       <kbd>Ctrl</kbd>+<kbd>← ↑ ↓ →</kbd><span>mover a imagem pelo teclado</span>
       <kbd>v</kbd><span>alternar imagem ↔ transcrição</span>
+      <kbd>x</kbd><span>remover a nota (reabrir; histórico mantido)</span>
       <kbd>s</kbd><span>mostrar/ocultar a lista de alunos</span>
       <kbd>Esc</kbd><span>sair do campo de texto / fechar</span>
       <kbd>?</kbd><span>esta ajuda</span>
@@ -533,6 +536,20 @@
     say(untouched ? "aceita" : "ajustada", "ok");
     if (IDX < ITEMS.length - 1) go(1); else render();
   }
+
+  // Remove the grade from this answer — back to "pending", distinct from a 0.
+  // Append-only (a 'reopen' event); the previous grade stays in the history.
+  window.reopenItem = async function () {
+    const it = cur();
+    if (!it) return;
+    if (!it.decision) { say("Esta resposta ainda não tem nota.", ""); return; }
+    say("removendo a nota…");
+    const r = await api({ action: "commit", itemId: it.id, kind: "reopen" });
+    if (!r.ok) { say(r.data.message || r.data.error || "Falha ao remover.", "err"); return; }
+    it.decision = null;
+    loadItemState();   // back to pending (proposal/blank), re-rendered
+    say("nota removida — resposta reaberta (histórico mantido)", "ok");
+  };
 
   function propagateInCluster(src) {
     if (!src.clusterKey) return;
@@ -840,6 +857,7 @@
       case "-":          e.preventDefault(); zoom(-0.2); break;
       case "0":          e.preventDefault(); resetView(); break;
       case "v":          e.preventDefault(); toggleScanView(); break;
+      case "x":          e.preventDefault(); reopenItem(); break;
       case "s":          e.preventDefault(); $("sidebar").classList.toggle("hidden"); break;
       case "?":          e.preventDefault(); openHelp(); break;
       default:
