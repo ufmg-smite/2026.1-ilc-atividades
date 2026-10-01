@@ -36,6 +36,7 @@ const BUCKET = "answers"; // private Storage bucket for photo answers
 const ADMIN_ACTIONS = new Set([
   "open", "close", "status", "listQuizzes", "getQuiz", "saveQuiz", "renameQuiz",
   "setArchived", "analyze", "getAnswers", "generateCorrection",
+  "lockRoster", "lockOverride",
 ]);
 
 function json(body: unknown, status: number): Response {
@@ -107,6 +108,114 @@ async function getOpenQuiz() {
   const rows = await res.json();
   for (const q of rows) if (windowState(q).isOpen) return q;
   return null;
+}
+
+// ============================================================
+//  In-class commitment ("entrega em aula") — optional two-phase mode.
+//  A quiz may set `in_class_minutes` (M, with 0 < M < global duration). Then:
+//   • Phase 1 (first M minutes): the whole quiz is visible and editable.
+//   • At M: ONE question the student picked (the "questão da aula") freezes.
+//       - default = the first question they gave a non-empty answer to;
+//       - re-selectable until M (last choice wins; it only picks WHICH question
+//         locks, never when — the lock happens at M).
+//   • Phase 2 (M .. global end): if the chosen question is NON-EMPTY, it is
+//     frozen and the REST stays editable to the end; if it is EMPTY, the whole
+//     quiz is closed for that student.
+//   • The teacher can reopen a student's ACCESS (phase-2 access) and/or their
+//     frozen QUESTION, independently (lock_overrides, append-only, last wins).
+//  State lives in two tables: lock_choices (the pick) and lock_overrides.
+// ============================================================
+const LOCK_GRACE_MIN = 0.5; // 30s grace past M to absorb the boundary flush
+function inClassMinutes(quiz: any): number {
+  const m = Number(quiz.in_class_minutes);
+  return Number.isFinite(m) && m > 0 ? Math.floor(m) : 0;
+}
+function lockFeatureActive(quiz: any): boolean {
+  const m = inClassMinutes(quiz);
+  return m > 0 && m < maxDurationMinutes(quiz) && !!quiz.opened_at && !quiz.force_closed;
+}
+function minutesSinceOpen(quiz: any): number {
+  return (Date.now() - new Date(quiz.opened_at).getTime()) / 60000;
+}
+function answerNonEmpty(s: any): boolean {
+  return !!s && ((typeof s.answer === "string" && s.answer.trim() !== "") ||
+    (Array.isArray(s.image_ids) && s.image_ids.length > 0));
+}
+async function studentSubs(quizId: string, email: string): Promise<any[]> {
+  const res = await db(
+    `submissions?quiz_id=eq.${encodeURIComponent(quizId)}` +
+    `&student_email=eq.${encodeURIComponent(email)}` +
+    `&select=question_id,answer,image_ids,created_at&order=created_at`,
+  );
+  return res.ok ? await res.json() : [];
+}
+// First question (chronologically) the student gave a non-empty answer to.
+function defaultLockQ(subs: any[]): string | null {
+  for (const s of subs) if (answerNonEmpty(s)) return s.question_id;
+  return null;
+}
+function latestByQ(subs: any[]): Record<string, any> {
+  const m: Record<string, any> = {};
+  for (const s of subs) m[s.question_id] = s; // asc order -> last wins
+  return m;
+}
+async function lockChoice(quizId: string, email: string): Promise<string | null> {
+  const res = await db(
+    `lock_choices?quiz_id=eq.${encodeURIComponent(quizId)}` +
+    `&student_email=eq.${encodeURIComponent(email)}` +
+    `&order=created_at.desc&limit=1&select=question_id`,
+  );
+  const rows = res.ok ? await res.json() : [];
+  return rows[0]?.question_id ?? null;
+}
+async function lockOverridesFor(
+  quizId: string, email: string,
+): Promise<{ access: boolean; question: boolean }> {
+  const res = await db(
+    `lock_overrides?quiz_id=eq.${encodeURIComponent(quizId)}` +
+    `&student_email=eq.${encodeURIComponent(email.toLowerCase())}` +
+    `&order=created_at.desc&select=kind,granted`,
+  );
+  const rows = res.ok ? await res.json() : [];
+  const latest: Record<string, boolean> = {};
+  for (const r of rows) if (!(r.kind in latest)) latest[r.kind] = r.granted === true;
+  return { access: latest.access === true, question: latest.question === true };
+}
+// Full per-student lock status (chosen/default question, gate, teacher overrides).
+async function lockStatus(quiz: any, email: string) {
+  const subs = await studentSubs(quiz.id, email);
+  const choice = await lockChoice(quiz.id, email);
+  const lockQ = choice ?? defaultLockQ(subs);
+  const latest = latestByQ(subs);
+  const gateMet = !!lockQ && answerNonEmpty(latest[lockQ]);
+  const ov = await lockOverridesFor(quiz.id, email);
+  return { lockQ, isDefault: !choice, gateMet, access: ov.access, question: ov.question };
+}
+// Decide whether a submission to `qid` by `email` is accepted right now. Folds
+// the global/per-question deadline together with the two-phase lock rules.
+async function acceptSubmission(
+  quiz: any, qid: string, email: string,
+): Promise<{ open: boolean; scope?: string; message?: string }> {
+  if (!questionOpen(quiz, qid)) {
+    const scope = windowState(quiz).isOpen ? "question" : "quiz";
+    return { open: false, scope,
+      message: scope === "quiz" ? "O tempo do quiz terminou." : "O tempo desta questão terminou." };
+  }
+  if (!lockFeatureActive(quiz)) return { open: true };
+  // A short grace past M keeps an in-flight boundary flush (the page auto-saves
+  // the chosen question exactly at M) from being lost to clock skew / latency.
+  // The page freezes its UI at M regardless, so students never edit in the grace.
+  if (minutesSinceOpen(quiz) <= inClassMinutes(quiz) + LOCK_GRACE_MIN) return { open: true }; // phase 1
+  const st = await lockStatus(quiz, email);                                   // phase 2
+  if (!(st.gateMet || st.access)) {
+    return { open: false, scope: "quiz",
+      message: "A etapa em aula não foi concluída — o quiz está fechado para você." };
+  }
+  if (qid === st.lockQ && !st.question) {
+    return { open: false, scope: "question",
+      message: "Esta questão já foi entregue definitivamente." };
+  }
+  return { open: true };
 }
 
 async function submissionCount(quizId: string): Promise<string> {
@@ -250,7 +359,7 @@ Deno.serve(async (req) => {
     if (action === "listQuizzes") {
       const filter = p.includeArchived === true ? "" : "&archived=eq.false";
       const res = await db(
-        `quizzes?select=id,title,opened_at,duration_minutes,force_closed,archived,questions&order=id${filter}`,
+        `quizzes?select=id,title,opened_at,duration_minutes,in_class_minutes,force_closed,archived,questions&order=id${filter}`,
       );
       if (!res.ok) return json({ error: "Could not list quizzes" }, 500);
       const rows = await res.json();
@@ -260,6 +369,7 @@ Deno.serve(async (req) => {
           id: q.id, title: q.title, isOpen: w.isOpen,
           openedAt: q.opened_at, endsAt: w.endsAt,
           durationMinutes: q.duration_minutes, forceClosed: q.force_closed,
+          inClassMinutes: inClassMinutes(q) || null,
           archived: q.archived === true,
         };
       });
@@ -274,6 +384,7 @@ Deno.serve(async (req) => {
         quiz: {
           id: quiz.id, title: quiz.title, description: quiz.description,
           questions: quiz.questions, durationMinutes: quiz.duration_minutes,
+          inClassMinutes: quiz.in_class_minutes ?? null,
         },
       }, 200);
     }
@@ -451,6 +562,11 @@ Deno.serve(async (req) => {
       const dur = Number.isFinite(p.durationMinutes) && p.durationMinutes > 0
         ? Math.min(Math.floor(p.durationMinutes), 600)
         : 30;
+      // Optional in-class window (minutes). Must be below the global duration to
+      // mean anything; null = feature off (ordinary single-phase quiz).
+      const icmRaw = Number(p.inClassMinutes);
+      const inClass = Number.isFinite(icmRaw) && icmRaw > 0
+        ? Math.min(Math.floor(icmRaw), dur) : null;
       // `originalId` is the id the editor was opened with (null for a new quiz).
       // Guard only when the client sent it, so an older cached page (which omits
       // the field) can still edit during the deploy window.
@@ -472,7 +588,8 @@ Deno.serve(async (req) => {
         if (Number.isFinite(d) && d > 0) out.durationMinutes = Math.min(Math.floor(d), 600);
         return out;
       });
-      const body = { title, description: description ?? null, questions: cleanQuestions, duration_minutes: dur };
+      const body = { title, description: description ?? null, questions: cleanQuestions,
+        duration_minutes: dur, in_class_minutes: inClass };
       let r: Response;
       if (existing) {
         // snapshot the CURRENT content before overwriting — nothing is ever lost
@@ -526,6 +643,78 @@ Deno.serve(async (req) => {
         body: JSON.stringify({ archived: p.archived }),
       });
       if (!r.ok) return json({ error: "Falha ao arquivar" }, 500);
+      return json({ ok: true }, 200);
+    }
+
+    // Who is on the in-class-commitment list, their chosen question, whether their
+    // gate is met, and any teacher overrides — for the admin "Entrega em aula" panel.
+    if (action === "lockRoster") {
+      const quiz = await getQuiz(p.quizId);
+      if (!quiz) return json({ error: "Quiz not found" }, 404);
+      const sres = await db(
+        `submissions?quiz_id=eq.${encodeURIComponent(p.quizId)}` +
+        `&select=student_name,student_email,question_id,answer,image_ids,created_at&order=created_at`,
+      );
+      const subs = sres.ok ? await sres.json() : [];
+      const byStu: Record<string, any[]> = {}; const names: Record<string, string> = {};
+      for (const s of subs) {
+        const e = (s.student_email || "").toLowerCase();
+        (byStu[e] ??= []).push(s);
+        if (s.student_name) names[e] = s.student_name;
+      }
+      const cres = await db(
+        `lock_choices?quiz_id=eq.${encodeURIComponent(p.quizId)}&order=created_at.desc&select=student_email,question_id`,
+      );
+      const choice: Record<string, string> = {};
+      for (const r of (cres.ok ? await cres.json() : [])) {
+        const e = (r.student_email || "").toLowerCase();
+        if (!(e in choice)) choice[e] = r.question_id;
+      }
+      const ores = await db(
+        `lock_overrides?quiz_id=eq.${encodeURIComponent(p.quizId)}&order=created_at.desc&select=student_email,kind,granted`,
+      );
+      const ov: Record<string, Record<string, boolean>> = {};
+      for (const r of (ores.ok ? await ores.json() : [])) {
+        const e = (r.student_email || "").toLowerCase();
+        (ov[e] ??= {});
+        if (!(r.kind in ov[e])) ov[e][r.kind] = r.granted === true;
+      }
+      const roster = Object.keys(byStu).map((e) => {
+        const list = byStu[e];
+        const latest = latestByQ(list);
+        const lockQ = choice[e] ?? defaultLockQ(list);
+        const gateMet = !!lockQ && answerNonEmpty(latest[lockQ]);
+        return {
+          email: e, name: names[e] || "", lockQuestionId: lockQ,
+          isDefault: !(e in choice), gateMet,
+          accessOverride: ov[e]?.access === true,
+          questionOverride: ov[e]?.question === true,
+        };
+      }).sort((a, b) => {
+        const na = (a.name || a.email).toLowerCase(), nb = (b.name || b.email).toLowerCase();
+        return na < nb ? -1 : na > nb ? 1 : 0;
+      });
+      return json({ ok: true, inClassMinutes: inClassMinutes(quiz),
+        active: lockFeatureActive(quiz), roster }, 200);
+    }
+
+    // Reopen a student's phase-2 ACCESS or their frozen QUESTION (append-only; the
+    // latest row per (student,kind) wins). Two independent switches, as the teacher
+    // asked — reopening access never un-freezes the committed question, and vice versa.
+    if (action === "lockOverride") {
+      const { quizId, studentEmail, kind } = p;
+      if (!quizId || !studentEmail || (kind !== "access" && kind !== "question")) {
+        return json({ error: "Parâmetros inválidos" }, 400);
+      }
+      if (!(await getQuiz(quizId))) return json({ error: "Quiz not found" }, 404);
+      const r = await db(`lock_overrides`, {
+        method: "POST", headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({
+          quiz_id: quizId, student_email: String(studentEmail).toLowerCase(),
+          kind, granted: p.granted !== false, actor_email: who.email,
+        }),
+      });
+      if (!r.ok) return json({ error: "Falha ao registrar" }, 500);
       return json({ ok: true }, 200);
     }
 
@@ -669,9 +858,60 @@ Deno.serve(async (req) => {
       quiz: {
         id: quiz.id, title: quiz.title, description: quiz.description,
         questions, endsAt: w.endsAt, openedAt: quiz.opened_at,
+        inClassMinutes: lockFeatureActive(quiz) ? inClassMinutes(quiz) : null, // only in two-phase mode
         serverNow: new Date().toISOString(), // client uses this to correct a skewed device clock
       },
     }, 200);
+  }
+
+  // Per-student in-class-commitment status (the page polls this to show which
+  // question is "da aula", whether the gate is met, and after M to freeze/open).
+  if (action === "lockState") {
+    const quiz = p.quizId ? await getQuiz(p.quizId) : await getOpenQuiz();
+    const email = typeof p.studentEmail === "string" ? p.studentEmail : "";
+    if (!quiz || !email) return json({ error: "bad_request" }, 400);
+    if (!lockFeatureActive(quiz)) return json({ ok: true, active: false }, 200);
+    const M = inClassMinutes(quiz);
+    const openedMs = new Date(quiz.opened_at).getTime();
+    const st = await lockStatus(quiz, email);
+    return json({
+      ok: true, active: true, inClassMinutes: M,
+      phase1EndsAt: new Date(openedMs + M * 60000).toISOString(),
+      lockQuestionId: st.lockQ, isDefault: st.isDefault,
+      lockQuestionEmpty: !st.gateMet, gateMet: st.gateMet,
+      phase: minutesSinceOpen(quiz) <= M ? 1 : 2,
+      accessOverride: st.access, questionOverride: st.question,
+      endsAt: windowState(quiz).endsAt,
+      serverNow: new Date().toISOString(),
+    }, 200);
+  }
+
+  // Pick WHICH question becomes the "questão da aula" (the one that freezes at M).
+  // Allowed only in phase 1; last pick wins. Picking does NOT lock anything now.
+  if (action === "chooseLock") {
+    const { quizId, studentEmail, questionId } = p;
+    if (!quizId || !studentEmail || !questionId) return json({ error: "Missing fields" }, 400);
+    const quiz = await getQuiz(quizId);
+    if (!quiz) return json({ error: "Quiz not found" }, 404);
+    if (!lockFeatureActive(quiz)) return json({ error: "not_applicable" }, 400);
+    if (minutesSinceOpen(quiz) > inClassMinutes(quiz)) {
+      return json({ error: "closed", scope: "lock",
+        message: "O período de escolha da questão da aula terminou." }, 423);
+    }
+    if (!(Array.isArray(quiz.questions) && quiz.questions.some((q: any) => q && q.id === questionId))) {
+      return json({ error: "Questão inválida" }, 400);
+    }
+    const bucket = `lock:${quizId}:${studentEmail.toLowerCase()}`;
+    if (await rateCount(bucket, 30) >= 30) {
+      return json({ error: "Aguarde alguns segundos." }, 429);
+    }
+    await rateHit(bucket);
+    const r = await db(`lock_choices`, {
+      method: "POST", headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ quiz_id: quizId, student_email: studentEmail, question_id: questionId }),
+    });
+    if (!r.ok) return json({ error: "Falha ao registrar escolha" }, 500);
+    return json({ ok: true }, 200);
   }
 
   if (action === "submit" || action === undefined) {
@@ -684,13 +924,11 @@ Deno.serve(async (req) => {
     }
     const quiz = await getQuiz(quizId);
     if (!quiz) return json({ error: "Quiz not found" }, 404);
-    if (!questionOpen(quiz, questionId)) {
-      // scope="quiz" when the whole quiz is closed (force-closed or past the last
-      // deadline) so the page locks everything; "question" when only this one ended.
-      const scope = windowState(quiz).isOpen ? "question" : "quiz";
-      return json({ error: "closed", scope,
-        message: scope === "quiz" ? "O tempo do quiz terminou." : "O tempo desta questão terminou." }, 423);
-    }
+    // scope="quiz" when the whole quiz is closed (force-closed, past the last
+    // deadline, or the in-class gate was missed) so the page locks everything;
+    // "question" when only this one ended / was committed "da aula".
+    const acc = await acceptSubmission(quiz, questionId, studentEmail);
+    if (!acc.open) return json({ error: "closed", scope: acc.scope, message: acc.message }, 423);
 
     // anti-spam: throttle FREQUENCY per student (email), not per IP and not a
     // total cap — so classmates sharing one campus IP never throttle each other,
@@ -746,11 +984,8 @@ Deno.serve(async (req) => {
 
     const quiz = await getQuiz(quizId);
     if (!quiz) return json({ error: "Quiz not found" }, 404);
-    if (!questionOpen(quiz, questionId)) {
-      const scope = windowState(quiz).isOpen ? "question" : "quiz";
-      return json({ error: "closed", scope,
-        message: scope === "quiz" ? "O tempo do quiz terminou." : "O tempo desta questão terminou." }, 423);
-    }
+    const acc = await acceptSubmission(quiz, questionId, studentEmail);
+    if (!acc.open) return json({ error: "closed", scope: acc.scope, message: acc.message }, 423);
 
     // throttle image uploads per student, and cap per question
     const bucket = `img:${quizId}:${studentEmail.toLowerCase()}`;

@@ -77,6 +77,27 @@
     .note { font-size:12px; color:#5f6368; margin-top:6px; }
     .center-msg { text-align:center; color:#444; }
 
+    /* ---- in-class commitment ("entrega em aula") ---- */
+    #lockCard { border-left:5px solid var(--accent); }
+    #lockCard.warn { border-left-color:#f29900; background:#fff8ec; }
+    #lockCard.okgate { border-left-color:var(--ok); background:#f2faf4; }
+    #lockCard.shut { border-left-color:var(--err); background:#fdecea; }
+    #lockCard .lkmain { font-size:15px; font-weight:500; }
+    #lockCard .lksub { font-size:13px; color:#444; margin-top:5px; line-height:1.5; }
+    #lockCard .lkclock { font-variant-numeric:tabular-nums; font-weight:600; }
+    #lockCard .lkwarn { color:#b06000; font-weight:600; }
+    #lockCard .lkok { color:var(--ok); font-weight:600; }
+    .lockctl { margin:0 0 10px; }
+    .lockctl.hidden { display:none; }
+    .lockctl .lkpick { background:#f5f2fb; border:1px solid var(--accent); color:var(--accent);
+                       border-radius:6px; padding:6px 12px; font-size:13px; cursor:pointer; font-weight:500; }
+    .lockctl .lkpick:hover { background:#ece4fb; }
+    .lockctl .lkbadge { display:inline-block; background:#ede4fb; color:#4a2c91; border:1px solid var(--accent);
+                        border-radius:6px; padding:5px 11px; font-size:13px; font-weight:600; }
+    .lockctl .lkbadge.frozen { background:#e6f4ea; color:#0f6b33; border-color:#0f6b33; }
+    .lockctl .lknote { font-size:12px; color:#5f6368; margin-top:3px; }
+    .lockctl .lknote.empty { color:#b06000; font-weight:600; }
+
     /* ---- proof step helper ---- */
     .pstep { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:6px; font-size:13px; color:#5f6368; }
     .pstep select { font:inherit; padding:5px; border:1px solid var(--line); border-radius:6px; }
@@ -171,6 +192,7 @@
       <p class="note">🔒 Copiar e colar estão desativados — digite suas respostas. 
         Dica: escreva as fórmulas entre cifrões, por exemplo <code>$\forall x\,\exists y\,(x&lt;y)$</code>, para visualizá-las renderizadas.</p>
     </div>
+    <div class="card hidden" id="lockCard"></div>
     <div id="questions"></div>
     <div class="card center-msg" id="endCard">
       <p>Ao terminar, verifique que cada questão mostra <strong>“✓ Enviado”</strong>.</p>
@@ -181,7 +203,11 @@
   (function () {
     const $ = (id) => document.getElementById(id);
     let STUDENT = "", EMAIL = "", ENDS_AT = 0, LOCKED = false, DISTINCT_DEADLINES = 1, CLOCK_OFFSET = 0;
-    const state = {}; // questionId -> { dirty, el, st, photos, endsAt, num, card, badge, locked }
+    const state = {}; // questionId -> { dirty, el, st, photos, endsAt, num, card, badge, locked, lockctl }
+    let QORDER = [];  // question ids in render order
+    // In-class-commitment ("entrega em aula") state; null = feature off for this quiz.
+    let LOCK = null;  // { inClassMinutes, phase1EndsAt, lockQ, lockChosen, gateMet, phase, accessOverride, questionOverride }
+    let phase2Entered = false;
 
     // ---------- math toolbar ----------
     const SYMBOLS = [
@@ -356,6 +382,7 @@
     function markDirty(qid) {
       state[qid].dirty = true;
       if (!LOCKED) { state[qid].st.textContent = "Alterações não enviadas"; state[qid].st.className = "save-state dirty"; }
+      if (LOCK && LOCK.phase === 1) scheduleLockUI(); // photos affect emptiness too
     }
 
     // Stage a photo LOCALLY (compressed). Nothing is uploaded until the student
@@ -499,7 +526,22 @@
       ).size;
 
       const container = $("questions");
+      QORDER = quiz.questions.map((q) => q.id);
       quiz.questions.forEach((q, i) => container.appendChild(buildQuestion(q, i + 1)));
+
+      // In-class commitment: the quiz carries in_class_minutes only in two-phase mode.
+      if (quiz.inClassMinutes && quiz.openedAt) {
+        LOCK = {
+          inClassMinutes: quiz.inClassMinutes,
+          phase1EndsAt: new Date(quiz.openedAt).getTime() + quiz.inClassMinutes * 60000,
+          lockQ: null, lockChosen: false, gateMet: false, phase: 1,
+          accessOverride: false, questionOverride: false,
+        };
+        $("lockCard").classList.remove("hidden");
+        applyLockUIAll();                   // show markers immediately (local guess)
+        refreshLockState();                 // authoritative per-student status
+        setInterval(refreshLockState, 20000); // pick up default changes / teacher reopen
+      }
 
       startTimer();
     }
@@ -517,6 +559,11 @@
       badge.className = "qclock hidden";
       head.appendChild(hlabel); head.appendChild(badge);
       card.appendChild(head);
+
+      // in-class-commitment control (shown only when the feature is active)
+      const lockctl = document.createElement("div");
+      lockctl.className = "lockctl hidden";
+      card.appendChild(lockctl);
 
       const prompt = document.createElement("div");
       prompt.className = "prompt";
@@ -650,7 +697,7 @@
 
       state[q.id] = {
         dirty: saved != null, el: ta, st, photos: [],
-        num, card, badge, locked: false,
+        num, card, badge, locked: false, lockctl,
         endsAt: q.endsAt ? new Date(q.endsAt).getTime() : ENDS_AT,
       };
 
@@ -659,6 +706,9 @@
         paintPreview();
         state[q.id].dirty = true;
         if (!LOCKED) { st.textContent = "Alterações não enviadas"; st.className = "save-state dirty"; }
+        // the default "questão da aula" follows the first answered question, so
+        // refresh the markers/warning live as they type or clear an answer.
+        if (LOCK && LOCK.phase === 1) scheduleLockUI();
       });
 
       btn.addEventListener("click", () => submitOne(q.id, st, btn));
@@ -753,6 +803,7 @@
             : (imageIds.length ? `✓ Enviado com ${imageIds.length} foto(s)` : "✓ Enviado");
           st.className = failed ? "save-state err" : "save-state ok";
           await persistSent(qid);   // remember sent photos so a refresh shows them as saved
+          if (LOCK) refreshLockState(); // the server now sees this answer (default/gate)
         } else if (status === 423) {
           on423(qid, data);
         } else if (status === 0) {
@@ -791,6 +842,8 @@
       const banner = $("banner");
       banner.classList.remove("hidden");
       const now = Date.now() + CLOCK_OFFSET;
+
+      if (LOCK) updateLockPhase(now); // in-class commitment: phase 1 -> freeze at M
 
       // lock any question whose own deadline has passed
       for (const qid in state) {
@@ -906,6 +959,175 @@
       if (document.visibilityState === "hidden") flushDirty();
     });
     window.addEventListener("pagehide", flushDirty);
+
+    // ===== in-class commitment ("entrega em aula") =====
+    // Two-phase mode: for the first M minutes everything is editable; at M the one
+    // question the student picked (the "questão da aula") freezes, and the rest
+    // stays open until the end ONLY IF that question is non-empty. The server is
+    // the authority (lockState / acceptSubmission); this is the matching UI.
+    const hhmm = (ms) => new Date(ms).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    function nonEmptyLocal(qid) {
+      const s = state[qid];
+      return !!s && ((s.el.value.trim() !== "") || (s.photos && s.photos.length > 0));
+    }
+    // Which question will lock: the explicit pick if any, else the first question
+    // with a (locally) non-empty answer — mirrors the server's default.
+    function effectiveLockQ() {
+      if (!LOCK) return null;
+      if (LOCK.lockChosen && LOCK.lockQ) return LOCK.lockQ;
+      for (const qid of QORDER) if (nonEmptyLocal(qid)) return qid;
+      return LOCK.lockQ || null; // server default (e.g. answered on another device)
+    }
+
+    async function refreshLockState() {
+      if (!LOCK) return;
+      const prev = { acc: LOCK.accessOverride, q: LOCK.questionOverride };
+      const { ok, data } = await api({ action: "lockState", quizId: QUIZ_ID, studentEmail: EMAIL });
+      if (!ok || !data.ok || !data.active) return;
+      LOCK.lockQ = data.lockQuestionId;
+      LOCK.lockChosen = !data.isDefault;
+      LOCK.gateMet = data.gateMet;
+      LOCK.phase = data.phase;
+      LOCK.accessOverride = data.accessOverride;
+      LOCK.questionOverride = data.questionOverride;
+      // A teacher reopen after we've already entered phase 2 grants more access than
+      // the page currently reflects — reload to re-render cleanly from the drafts.
+      if (phase2Entered && ((LOCK.accessOverride && !prev.acc) || (LOCK.questionOverride && !prev.q))) {
+        location.reload(); return;
+      }
+      applyLockUIAll();
+    }
+
+    let lockUITimer = 0;
+    function scheduleLockUI() { clearTimeout(lockUITimer); lockUITimer = setTimeout(applyLockUIAll, 150); }
+
+    // Per-question markers + the summary card. Local-content aware, so the warning
+    // about an empty "questão da aula" reacts immediately to typing/clearing.
+    function applyLockUIAll() {
+      if (!LOCK) return;
+      const now = Date.now() + CLOCK_OFFSET;
+      const phase1 = now < LOCK.phase1EndsAt;
+      const effLQ = effectiveLockQ();
+      for (const qid of QORDER) {
+        const s = state[qid]; if (!s) continue;
+        const ctl = s.lockctl; ctl.innerHTML = ""; ctl.classList.add("hidden");
+        if (phase1) {
+          ctl.classList.remove("hidden");
+          if (qid === effLQ) {
+            const empty = !nonEmptyLocal(qid);
+            ctl.innerHTML =
+              `<span class="lkbadge">★ Questão da aula</span>` +
+              `<div class="lknote${empty ? " empty" : ""}">` +
+              (empty
+                ? "Sem resposta ainda — responda aqui, ou escolha outra questão abaixo."
+                : `Será entregue definitivamente às ${hhmm(LOCK.phase1EndsAt)}. As demais continuam editáveis depois.`) +
+              `</div>`;
+          } else {
+            const b = document.createElement("button");
+            b.type = "button"; b.className = "lkpick";
+            b.textContent = "Escolher como questão da aula";
+            b.addEventListener("click", () => chooseLock(qid));
+            ctl.appendChild(b);
+          }
+        } else if (qid === LOCK.lockQ && s.locked) {
+          ctl.classList.remove("hidden");
+          ctl.innerHTML = `<span class="lkbadge frozen">🔒 Entregue definitivamente (questão da aula)</span>`;
+        }
+      }
+      updateLockCard(now);
+    }
+
+    function updateLockCard(now) {
+      const card = $("lockCard"); if (!LOCK) return;
+      card.className = "card"; // reset modifiers
+      const phase1 = now < LOCK.phase1EndsAt;
+      if (phase1) {
+        const left = Math.max(0, Math.floor((LOCK.phase1EndsAt - now) / 1000));
+        const effLQ = effectiveLockQ();
+        const empty = !effLQ || !nonEmptyLocal(effLQ);
+        const qtxt = effLQ ? ("Questão " + state[effLQ].num) : "(nenhuma ainda)";
+        const auto = (!LOCK.lockChosen) ? " — escolhida automaticamente (a 1ª que você responde); toque em “Escolher” em outra para trocar" : "";
+        card.classList.add(empty ? "warn" : "okgate");
+        card.innerHTML =
+          `<div class="lkmain">Etapa em aula — termina em <span class="lkclock">${mmss(left)}</span></div>` +
+          `<div class="lksub">Durante este período, responda normalmente. No fim da etapa, <b>uma</b> questão — a sua “questão da aula” — é entregue <b>definitivamente</b> e não poderá mais ser alterada; as demais ficam liberadas até <b>${hhmm(ENDS_AT)}</b>.</div>` +
+          `<div class="lksub">Questão da aula: <b>${qtxt}</b>${auto}.</div>` +
+          (empty
+            ? `<div class="lksub lkwarn">⚠ Sua questão da aula está sem resposta. Se continuar vazia no fim da etapa, o restante do quiz será trancado.</div>`
+            : `<div class="lksub lkok">✓ Questão da aula registrada — o quiz segue liberado até ${hhmm(ENDS_AT)} mesmo depois da aula.</div>`);
+      } else {
+        const access = LOCK.gateMet || LOCK.accessOverride;
+        if (!access) {
+          card.classList.add("shut");
+          card.innerHTML =
+            `<div class="lkmain lkwarn">Quiz fechado — etapa em aula não concluída</div>` +
+            `<div class="lksub">Nenhuma questão foi entregue na etapa em aula, então o quiz foi trancado. Se isso for um engano, procure o professor para reabrir o seu acesso.</div>`;
+        } else {
+          card.classList.add("okgate");
+          const qtxt = LOCK.lockQ ? ("Questão " + (state[LOCK.lockQ] ? state[LOCK.lockQ].num : "?")) : "sua questão da aula";
+          card.innerHTML =
+            `<div class="lkmain lkok">✓ Etapa em aula concluída</div>` +
+            `<div class="lksub"><b>${qtxt}</b> foi entregue definitivamente. As demais questões seguem editáveis até <b>${hhmm(ENDS_AT)}</b>.</div>`;
+        }
+      }
+    }
+
+    function updateLockPhase(now) {
+      if (!LOCK) return;
+      if (now >= LOCK.phase1EndsAt) {
+        if (!phase2Entered) enterPhase2();
+        return;
+      }
+      updateLockCard(now); // tick the phase-1 countdown each second
+    }
+
+    async function chooseLock(qid) {
+      if (!LOCK || LOCK.phase !== 1) return;
+      const { ok, status, data } = await api({
+        action: "chooseLock", quizId: QUIZ_ID, studentEmail: EMAIL, questionId: qid,
+      });
+      if (ok && data.ok) { LOCK.lockQ = qid; LOCK.lockChosen = true; applyLockUIAll(); }
+      else if (status !== 423) { /* transient — the next refresh will re-sync */ }
+    }
+
+    async function enterPhase2() {
+      if (phase2Entered) return;
+      phase2Entered = true;
+      LOCK.phase = 2;
+      // Flush every unsent answer, in question order, so the server sees all the
+      // student's in-class work and computes the SAME "first answered" default the
+      // page has been showing — then we freeze exactly the question it locked.
+      for (const qid of QORDER) {
+        const s = state[qid];
+        if (s && s.dirty && !s.locked) { try { await submitOne(qid, s.st, null); } catch {} }
+      }
+      await refreshLockState(); // authoritative gate / lockQ now
+      applyPhase2();
+    }
+
+    function applyPhase2() {
+      if (!LOCK) return;
+      const access = LOCK.gateMet || LOCK.accessOverride;
+      if (!access) {
+        lockQuiz("⏱ A etapa em aula não foi concluída — o quiz está fechado para você.");
+        applyLockUIAll();
+        return;
+      }
+      if (LOCK.lockQ && !LOCK.questionOverride) freezeLockQuestion(LOCK.lockQ);
+      applyLockUIAll();
+    }
+
+    // Freeze just the committed question (read-only), leaving the rest editable.
+    function freezeLockQuestion(qid) {
+      const s = state[qid];
+      if (!s || s.locked) return;
+      s.locked = true;
+      s.dirty = false;
+      s.el.setAttribute("readonly", "true");
+      s.card.querySelectorAll("button, input[type=file], .thumb-rm").forEach((el) => { el.disabled = true; });
+      s.st.textContent = "🔒 Entregue definitivamente (questão da aula)";
+      s.st.className = "save-state ok";
+    }
 
     // ===== natural-deduction helper: numbered linear input -> Gentzen proof tree =====
     // Students type a numbered list (phone-friendly); each step cites the earlier

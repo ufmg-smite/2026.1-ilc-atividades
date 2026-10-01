@@ -91,6 +91,18 @@
       recebe só este resumo.</p>
   </div>
 
+  <!-- ===== in-class commitment roster ("entrega em aula") ===== -->
+  <div class="card hidden" id="entregaCard">
+    <h2>Entrega em aula</h2>
+    <p class="sub" id="entregaMeta"></p>
+    <div style="overflow-x:auto"><table class="qlist" id="entregaTable"><tbody></tbody></table></div>
+    <p class="hint"><b>Questão da aula</b> = a que será (ou foi) entregue definitivamente no fim da janela
+      presencial; “auto” = escolha automática (1ª respondida). <b>Portão</b> ✓ = essa questão não está
+      vazia (o aluno mantém acesso às demais); ✗ = vazia (quiz trancado para ele após a janela).
+      <b>Reabrir acesso</b> libera o restante do quiz; <b>Reabrir questão</b> destranca a questão entregue.
+      Nada é apagado — as reaberturas são registradas e podem ser refeitas.</p>
+  </div>
+
   <!-- ===== auto-correction (gabarito) ===== -->
   <div class="card hidden" id="corrCard">
     <h2>Correção automática (rascunho)</h2>
@@ -121,6 +133,12 @@
     <textarea id="qdesc" placeholder="Instruções gerais…"></textarea>
     <label>Duração (minutos)</label>
     <input id="qdur" type="number" value="480" min="1" />
+    <label>Entrega em aula — janela presencial (minutos, opcional)</label>
+    <input id="qicm" type="number" min="1" placeholder="em branco = desativado (ex.: 30)" />
+    <p class="hint">Se preenchido (e menor que a duração), ativa a <b>entrega em aula</b>: nos primeiros
+      N minutos o aluno responde normalmente; ao fim, <b>uma</b> questão que ele escolher (padrão: a
+      1ª que responder) é entregue <b>definitivamente</b>, e as demais só continuam liberadas se essa
+      questão não estiver vazia. Em branco = quiz comum de fase única.</p>
 
     <div id="questions"></div>
     <div class="row">
@@ -288,6 +306,7 @@
           if (cw) actions.appendChild(mkBtn("Abrir", "open", () => doOpen(q.id)));
           if (cw) actions.appendChild(mkBtn("Fechar", "close", () => doClose(q.id)));
           actions.appendChild(mkBtn("Status", "status", () => doStatus(q.id)));
+          if (q.inClassMinutes) actions.appendChild(mkBtn("Entrega em aula", "status", () => doEntrega(q.id)));
           if (cw) actions.appendChild(mkBtn("Editar", "edit", () => openEditor(q.id)));
           actions.appendChild(mkBtn("Analisar", "status", () => doAnalyze(q.id)));
           actions.appendChild(mkBtn("Correção", "save", () => doGenCorrection(q.id)));
@@ -565,12 +584,64 @@
       $("msg").textContent = `“${id}” — ${s.isOpen ? "ABERTO" : "fechado"} · envios: ${s.submissions} · fecha ${fmt(s.endsAt)}`;
     }
 
+    // ---------- in-class commitment roster ("entrega em aula") ----------
+    let ENTREGA_ID = null;
+    async function doEntrega(id) {
+      ENTREGA_ID = id;
+      $("entregaCard").classList.remove("hidden");
+      $("entregaMeta").textContent = "Carregando…";
+      $("entregaTable").querySelector("tbody").innerHTML = "";
+      $("entregaCard").scrollIntoView({ behavior: "smooth" });
+      const { ok, status, data } = await api({ action: "lockRoster", quizId: id });
+      if (!ok || !data.ok) { $("entregaMeta").textContent = invalid(status, data); $("entregaMeta").className = "sub err"; return; }
+      $("entregaMeta").className = "sub";
+      renderEntrega(data);
+    }
+
+    function renderEntrega(data) {
+      const roster = data.roster || [];
+      const met = roster.filter((r) => r.gateMet).length;
+      const shut = roster.filter((r) => !r.gateMet && !r.accessOverride).length;
+      $("entregaMeta").textContent =
+        `“${ENTREGA_ID}” · janela: ${data.inClassMinutes || "?"} min · ${roster.length} alunos · ` +
+        `${met} com portão ✓ · ${shut} trancado(s)` + (data.active ? "" : " · (quiz não está aberto)");
+      const tb = $("entregaTable").querySelector("tbody"); tb.innerHTML = "";
+      const head = document.createElement("tr");
+      head.innerHTML = "<td><b>Aluno</b></td><td><b>Questão da aula</b></td><td><b>Portão</b></td><td><b>Reabrir</b></td>";
+      tb.appendChild(head);
+      if (!roster.length) { const tr = document.createElement("tr"); tr.innerHTML = '<td colspan="4" class="mini">Nenhum envio ainda.</td>'; tb.appendChild(tr); return; }
+      for (const r of roster) {
+        const tr = document.createElement("tr");
+        const q = r.lockQuestionId ? (r.lockQuestionId + (r.isDefault ? " (auto)" : "")) : "—";
+        const gate = r.gateMet
+          ? '<span class="pill on">✓</span>'
+          : (r.accessOverride ? '<span class="pill on">acesso reaberto</span>' : '<span class="pill off">✗ vazia</span>');
+        tr.innerHTML =
+          `<td>${escapeHtml(r.name || r.email)}<br><span class="mini">${escapeHtml(r.email)}</span></td>` +
+          `<td>${escapeHtml(q)}</td><td>${gate}</td><td></td>`;
+        const cell = tr.children[3];
+        const ba = mkBtn(r.accessOverride ? "✓ acesso" : "Reabrir acesso", r.accessOverride ? "edit" : "open",
+          () => doLockOverride(r.email, "access", !r.accessOverride));
+        const bq = mkBtn(r.questionOverride ? "✓ questão" : "Reabrir questão", r.questionOverride ? "edit" : "open",
+          () => doLockOverride(r.email, "question", !r.questionOverride));
+        ba.style.padding = bq.style.padding = "5px 10px";
+        cell.appendChild(ba); cell.appendChild(bq);
+        tb.appendChild(tr);
+      }
+    }
+
+    async function doLockOverride(email, kind, granted) {
+      const { ok, status, data } = await api({ action: "lockOverride", quizId: ENTREGA_ID, studentEmail: email, kind, granted });
+      if (ok && data.ok) doEntrega(ENTREGA_ID); // reload the roster
+      else { $("entregaMeta").textContent = invalid(status, data); $("entregaMeta").className = "sub err"; }
+    }
+
     // ---------- editor ----------
     let editingOriginalId = null; // id the editor was opened with (null = new quiz)
     let editorBaseline = "";      // editor state at last open/save — to detect unsaved edits
     const editorState = () => JSON.stringify({
       id: $("qid").value, title: $("qtitle").value, desc: $("qdesc").value,
-      dur: $("qdur").value, qs: collectQuestions(),
+      dur: $("qdur").value, icm: $("qicm").value, qs: collectQuestions(),
     });
     function closeEditor() {
       if (editorState() !== editorBaseline &&
@@ -608,6 +679,7 @@
         $("qtitle").value = q.title || "";
         $("qdesc").value = q.description || "";
         $("qdur").value = q.durationMinutes || DEFAULT_DUR;
+        $("qicm").value = (q.inClassMinutes != null) ? q.inClassMinutes : "";
         (q.questions || []).forEach((qq) => addQuestion(qq.id, qq.prompt, qq.durationMinutes));
         if (!q.questions || !q.questions.length) addQuestion("q1", "");
       } else {
@@ -615,6 +687,7 @@
         editingOriginalId = null;
         $("qid").value = ""; $("qid").disabled = false;
         $("qtitle").value = ""; $("qdesc").value = DEFAULT_DESC; $("qdur").value = DEFAULT_DUR;
+        $("qicm").value = "";
         addQuestion("q1", "");
       }
       $("editor").classList.remove("hidden");
@@ -676,6 +749,7 @@
         title: $("qtitle").value.trim(),
         description: $("qdesc").value,
         durationMinutes: parseInt($("qdur").value, 10) || DEFAULT_DUR,
+        inClassMinutes: parseInt($("qicm").value, 10) || null,
         questions: collectQuestions(),
       });
       if (ok && data.ok) {
