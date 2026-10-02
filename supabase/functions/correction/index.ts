@@ -586,16 +586,13 @@ Deno.serve(async (req) => {
       };
     });
 
-    // "spread": show a range of quality first, so the barème can be set with
-    // real answers in view before committing to point values.
-    if (p.order === "spread") {
-      const pending = out.filter((r) => !r.decision);
-      const done = out.filter((r) => r.decision);
-      pending.sort((a, b) => (b.proposal?.score ?? -1) - (a.proposal?.score ?? -1));
-      const woven: any[] = [];
-      let lo = 0, hi = pending.length - 1;
-      while (lo <= hi) { woven.push(pending[lo++]); if (lo <= hi) woven.push(pending[hi--]); }
-      out = [...woven, ...done];
+    // "alpha": straight alphabetical by student name — the easy way to find one
+    // particular student's answer later. (default = grouped by answer/cluster,
+    // which is the DB order cluster_key,student_name.)
+    if (p.order === "alpha") {
+      out.sort((a, b) =>
+        (a.studentName || a.studentEmail || "").localeCompare(
+          b.studentName || b.studentEmail || "", "pt-BR", { sensitivity: "base" }));
     }
     return json({ ok: true, question: q, criteria: defs, items: out }, 200);
   }
