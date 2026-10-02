@@ -601,6 +601,13 @@
     const r = await api({ action: "queue", runId: RUN, questionId: QID, order: $("orderSel").value });
     if (!r.ok) { say(r.data.message || r.data.error || "Falha ao carregar a fila.", "err"); return; }
     QUESTION = r.data.question; CRIT = r.data.criteria || []; ITEMS = r.data.items || [];
+    // Alphabetical is also applied client-side so it works even before the
+    // correction function is redeployed (the server does the same sort).
+    if ($("orderSel").value === "alpha") {
+      ITEMS.sort((a, b) =>
+        (a.studentName || a.studentEmail || "").localeCompare(
+          b.studentName || b.studentEmail || "", "pt-BR", { sensitivity: "base" }));
+    }
     signedAt = Date.now();
     IDX = ITEMS.findIndex((i) => !i.decision);
     if (IDX < 0) IDX = 0;
