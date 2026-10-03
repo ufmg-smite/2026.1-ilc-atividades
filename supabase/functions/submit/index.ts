@@ -385,6 +385,7 @@ Deno.serve(async (req) => {
           id: quiz.id, title: quiz.title, description: quiz.description,
           questions: quiz.questions, durationMinutes: quiz.duration_minutes,
           inClassMinutes: quiz.in_class_minutes ?? null,
+          showProofTools: quiz.show_proof_tools === true,
         },
       }, 200);
     }
@@ -589,7 +590,8 @@ Deno.serve(async (req) => {
         return out;
       });
       const body = { title, description: description ?? null, questions: cleanQuestions,
-        duration_minutes: dur, in_class_minutes: inClass };
+        duration_minutes: dur, in_class_minutes: inClass,
+        show_proof_tools: p.showProofTools === true };
       let r: Response;
       if (existing) {
         // snapshot the CURRENT content before overwriting — nothing is ever lost
@@ -859,6 +861,7 @@ Deno.serve(async (req) => {
         id: quiz.id, title: quiz.title, description: quiz.description,
         questions, endsAt: w.endsAt, openedAt: quiz.opened_at,
         inClassMinutes: lockFeatureActive(quiz) ? inClassMinutes(quiz) : null, // only in two-phase mode
+        showProofTools: quiz.show_proof_tools === true,
         serverNow: new Date().toISOString(), // client uses this to correct a skewed device clock
       },
     }, 200);

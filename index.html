@@ -54,7 +54,7 @@
     .preview th, .preview td, .prompt th, .prompt td {
       border: 1px solid var(--line); padding: 3px 10px; text-align: center; }
     .preview th, .prompt th { background: #f5f2fb; }
-    .qfoot { display:flex; align-items:center; gap:12px; margin-top:12px; }
+    .qfoot { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-top:12px; }
     .btn { background: var(--accent); color:#fff; border:0; padding: 9px 20px;
            border-radius: 6px; font-size: 14px; cursor: pointer; }
     .btn:disabled { opacity:.5; cursor:default; }
@@ -87,16 +87,13 @@
     #lockCard .lkclock { font-variant-numeric:tabular-nums; font-weight:600; }
     #lockCard .lkwarn { color:#b06000; font-weight:600; }
     #lockCard .lkok { color:var(--ok); font-weight:600; }
-    .lockctl { margin:0 0 10px; }
     .lockctl.hidden { display:none; }
     .lockctl .lkpick { background:#f5f2fb; border:1px solid var(--accent); color:var(--accent);
-                       border-radius:6px; padding:6px 12px; font-size:13px; cursor:pointer; font-weight:500; }
+                       border-radius:6px; padding:5px 10px; font-size:12px; cursor:pointer; font-weight:500; white-space:nowrap; }
     .lockctl .lkpick:hover { background:#ece4fb; }
     .lockctl .lkbadge { display:inline-block; background:#ede4fb; color:#4a2c91; border:1px solid var(--accent);
-                        border-radius:6px; padding:5px 11px; font-size:13px; font-weight:600; }
+                        border-radius:6px; padding:4px 9px; font-size:12px; font-weight:600; white-space:nowrap; }
     .lockctl .lkbadge.frozen { background:#e6f4ea; color:#0f6b33; border-color:#0f6b33; }
-    .lockctl .lknote { font-size:12px; color:#5f6368; margin-top:3px; }
-    .lockctl .lknote.empty { color:#b06000; font-weight:600; }
 
     /* ---- proof step helper ---- */
     .pstep { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:6px; font-size:13px; color:#5f6368; }
@@ -205,6 +202,7 @@
     let STUDENT = "", EMAIL = "", ENDS_AT = 0, LOCKED = false, DISTINCT_DEADLINES = 1, CLOCK_OFFSET = 0;
     const state = {}; // questionId -> { dirty, el, st, photos, endsAt, num, card, badge, locked, lockctl }
     let QORDER = [];  // question ids in render order
+    let SHOW_PROOF = false; // quiz flag: show the demonstração/dedução/árvore helpers
     // In-class-commitment ("entrega em aula") state; null = feature off for this quiz.
     let LOCK = null;  // { inClassMinutes, phase1EndsAt, lockQ, lockChosen, gateMet, phase, accessOverride, questionOverride }
     let phase2Entered = false;
@@ -217,6 +215,9 @@
       { l: "→", t: "\\to " }, { l: "↔", t: "\\leftrightarrow " }, { l: "≡", t: "\\equiv " },
       { l: "⊥", t: "\\bot " }, { l: "⊢", t: "\\vdash " },
       { l: "∈", t: "\\in " }, { l: "∉", t: "\\notin " },
+      { l: "∪", t: "\\cup " }, { l: "∩", t: "\\cap " }, { l: "∖", t: "\\setminus " },
+      { l: "⊆", t: "\\subseteq " }, { l: "⊂", t: "\\subset " }, { l: "⊇", t: "\\supseteq " },
+      { l: "×", t: "\\times " }, { l: "𝒫", t: "\\mathcal{P}", title: "conjunto das partes" },
       { l: "≥", t: "\\geq " }, { l: "≤", t: "\\leq " }, { l: "≠", t: "\\neq " },
       { l: "x²", t: "^{2}" }, { l: "xₙ", t: "_{n}" },
       { l: "a⁄b", t: "\\frac{}{}", caret: 6 }, { l: "√", t: "\\sqrt{}", caret: 6 },
@@ -511,6 +512,7 @@
       $("login").classList.add("hidden");
       $("quiz").classList.remove("hidden");
       QUIZ_ID = quiz.id;
+      SHOW_PROOF = quiz.showProofTools === true;
       $("qTitle").textContent = quiz.title;
       $("qDesc").innerHTML = renderRich(quiz.description || "");
       ENDS_AT = new Date(quiz.endsAt).getTime();
@@ -560,11 +562,6 @@
       head.appendChild(hlabel); head.appendChild(badge);
       card.appendChild(head);
 
-      // in-class-commitment control (shown only when the feature is active)
-      const lockctl = document.createElement("div");
-      lockctl.className = "lockctl hidden";
-      card.appendChild(lockctl);
-
       const prompt = document.createElement("div");
       prompt.className = "prompt";
       prompt.innerHTML = renderRich(q.prompt || "");
@@ -591,79 +588,78 @@
       ["paste", "cut", "copy", "drop"].forEach((ev) =>
         ta.addEventListener(ev, (e) => e.preventDefault()));
 
-      // proof step helper — carry a formula to a new line with the law in ( )
-      const pstep = document.createElement("div");
-      pstep.className = "pstep";
-      const lawSel = document.createElement("select");
-      ["(sem lei)"].concat(LAWS).forEach((l) => {
-        const o = document.createElement("option"); o.textContent = l;
-        if (LAW_HELP[l]) o.title = LAW_HELP[l];
-        lawSel.appendChild(o);
-      });
-      const stepBtn = document.createElement("button");
-      stepBtn.type = "button"; stepBtn.textContent = "≡ nova linha";
-      stepBtn.title = "Copia a fórmula selecionada (ou a da linha atual) para uma nova linha após o cursor, com a lei entre parênteses";
-      stepBtn.addEventListener("click", () => proofStep(ta, lawSel.value));
-      pstep.appendChild(document.createTextNode("Demonstração:"));
-      pstep.appendChild(lawSel);
-      pstep.appendChild(stepBtn);
-      card.appendChild(pstep);
-      // live caption for the selected law (works on phones, where `title` hover doesn't)
-      const pHint = document.createElement("div");
-      pHint.className = "helphint";
-      const updPHint = () => { pHint.textContent = LAW_HELP[lawSel.value] || ""; };
-      lawSel.addEventListener("change", updPHint); updPHint();
-      card.appendChild(pHint);
+      // Proof helpers (demonstração / dedução / árvore) — only when the quiz asks
+      // for them (admin flag). Most quizzes don't need them, so they stay hidden.
+      if (SHOW_PROOF) {
+        // proof step helper — carry a formula to a new line with the law in ( )
+        const pstep = document.createElement("div");
+        pstep.className = "pstep";
+        const lawSel = document.createElement("select");
+        ["(sem lei)"].concat(LAWS).forEach((l) => {
+          const o = document.createElement("option"); o.textContent = l;
+          if (LAW_HELP[l]) o.title = LAW_HELP[l];
+          lawSel.appendChild(o);
+        });
+        const stepBtn = document.createElement("button");
+        stepBtn.type = "button"; stepBtn.textContent = "≡ nova linha";
+        stepBtn.title = "Copia a fórmula selecionada (ou a da linha atual) para uma nova linha após o cursor, com a lei entre parênteses";
+        stepBtn.addEventListener("click", () => proofStep(ta, lawSel.value));
+        pstep.appendChild(document.createTextNode("Demonstração:"));
+        pstep.appendChild(lawSel);
+        pstep.appendChild(stepBtn);
+        card.appendChild(pstep);
+        const pHint = document.createElement("div");
+        pHint.className = "helphint";
+        const updPHint = () => { pHint.textContent = LAW_HELP[lawSel.value] || ""; };
+        lawSel.addEventListener("change", updPHint); updPHint();
+        card.appendChild(pHint);
 
-      // natural-deduction helper — build a numbered proof: pick a rule, then "+ passo"
-      // (or "+ hipótese") appends a line with a slot for the formula and the line
-      // numbers it uses. The preview can draw it as the class's Gentzen proof TREE.
-      const ndstep = document.createElement("div");
-      ndstep.className = "ndstep";
-      // one dropdown (premissa / hipótese / an inference rule) + one button, so the
-      // row stays on a single line on phones.
-      const ruleSel = document.createElement("select");
-      ["(regra)", "premissa", "hipótese"].concat(ND_RULES).forEach((r) => {
-        const o = document.createElement("option"); o.textContent = r;
-        if (ND_HELP[r]) o.title = ND_HELP[r];
-        ruleSel.appendChild(o);
-      });
-      const lineBtn = document.createElement("button");
-      lineBtn.type = "button"; lineBtn.textContent = "+ linha";
-      lineBtn.title = "Adiciona uma linha do tipo escolhido (premissa, hipótese, ou um passo de inferência)";
-      lineBtn.addEventListener("click", () => ndAddLine(ta, ruleSel.value, ruleSel.value === "hipótese"));
-      ndstep.appendChild(document.createTextNode("Dedução:"));
-      ndstep.appendChild(ruleSel); ndstep.appendChild(lineBtn);
-      card.appendChild(ndstep);
-      // live caption for the selected rule (mobile-friendly replacement for hover)
-      const ndHint = document.createElement("div");
-      ndHint.className = "helphint";
-      const updNdHint = () => { ndHint.textContent = ND_HELP[ruleSel.value] || ""; };
-      ruleSel.addEventListener("change", updNdHint); updNdHint();
-      card.appendChild(ndHint);
+        // natural-deduction helper — build a numbered proof: pick a rule, then "+ linha"
+        const ndstep = document.createElement("div");
+        ndstep.className = "ndstep";
+        const ruleSel = document.createElement("select");
+        ["(regra)", "premissa", "hipótese"].concat(ND_RULES).forEach((r) => {
+          const o = document.createElement("option"); o.textContent = r;
+          if (ND_HELP[r]) o.title = ND_HELP[r];
+          ruleSel.appendChild(o);
+        });
+        const lineBtn = document.createElement("button");
+        lineBtn.type = "button"; lineBtn.textContent = "+ linha";
+        lineBtn.title = "Adiciona uma linha do tipo escolhido (premissa, hipótese, ou um passo de inferência)";
+        lineBtn.addEventListener("click", () => ndAddLine(ta, ruleSel.value, ruleSel.value === "hipótese"));
+        ndstep.appendChild(document.createTextNode("Dedução:"));
+        ndstep.appendChild(ruleSel); ndstep.appendChild(lineBtn);
+        card.appendChild(ndstep);
+        const ndHint = document.createElement("div");
+        ndHint.className = "helphint";
+        const updNdHint = () => { ndHint.textContent = ND_HELP[ruleSel.value] || ""; };
+        ruleSel.addEventListener("change", updNdHint); updNdHint();
+        card.appendChild(ndHint);
 
-      // top-down proof builder (opens a pop-up; exports into this answer)
-      const ndbuild = document.createElement("div");
-      ndbuild.className = "ndbuild";
-      const ndbBtn = document.createElement("button");
-      ndbBtn.type = "button"; ndbBtn.className = "ndbuild-btn";
-      ndbBtn.textContent = "⊞ Construir demonstração (árvore)";
-      ndbBtn.title = "Abre um construtor de cima para baixo: clique nos objetivos e escolha as regras";
-      ndbBtn.addEventListener("click", () => openNDBuilder(ta));
-      ndbuild.appendChild(ndbBtn);
-      card.appendChild(ndbuild);
+        // top-down proof builder (opens a pop-up; exports into this answer)
+        const ndbuild = document.createElement("div");
+        ndbuild.className = "ndbuild";
+        const ndbBtn = document.createElement("button");
+        ndbBtn.type = "button"; ndbBtn.className = "ndbuild-btn";
+        ndbBtn.textContent = "⊞ Construir demonstração (árvore)";
+        ndbBtn.title = "Abre um construtor de cima para baixo: clique nos objetivos e escolha as regras";
+        ndbBtn.addEventListener("click", () => openNDBuilder(ta));
+        ndbuild.appendChild(ndbBtn);
+        card.appendChild(ndbuild);
+      }
 
-      // the answer box sits below the two helper rows (which follow the toolbar)
+      // the answer box sits below the helper rows (which follow the toolbar)
       card.appendChild(lab); card.appendChild(ta);
 
-      // preview — with a linear <-> árvore (proof tree) toggle
+      // preview — with a linear <-> árvore (proof tree) toggle (toggle only when proof tools on)
       const pvhead = document.createElement("div");
       pvhead.className = "pvhead";
       const plabel = document.createElement("span");
       plabel.className = "plabel2"; plabel.textContent = "Pré-visualização";
+      pvhead.appendChild(plabel);
       const pvtoggle = document.createElement("button");
       pvtoggle.type = "button"; pvtoggle.className = "pvtoggle"; pvtoggle.textContent = "🌳 árvore";
-      pvhead.appendChild(plabel); pvhead.appendChild(pvtoggle);
+      if (SHOW_PROOF) pvhead.appendChild(pvtoggle);
       card.appendChild(pvhead);
 
       const prev = document.createElement("div");
@@ -693,7 +689,10 @@
       const st = document.createElement("span");
       st.className = "save-state";
       if (saved != null) { st.textContent = "Rascunho salvo localmente"; st.className = "save-state dirty"; }
-      foot.appendChild(btn); foot.appendChild(st);
+      // in-class-commitment control sits next to Enviar (minimal; only when active)
+      const lockctl = document.createElement("span");
+      lockctl.className = "lockctl hidden";
+      foot.appendChild(btn); foot.appendChild(lockctl); foot.appendChild(st);
 
       state[q.id] = {
         dirty: saved != null, el: ta, st, photos: [],
@@ -862,6 +861,17 @@
       banner.style.background = danger ? "#fce8e6" : "#e8f0fe";
       banner.style.color = danger ? "#c5221f" : "#174ea6";
 
+      // In-class phase 1: show the EARLIEST deadline (the in-class lock) as a live
+      // countdown, plus the second (the full quiz end) as a clock time.
+      if (LOCK && now < LOCK.phase1EndsAt) {
+        const lockLeft = Math.max(0, Math.floor((LOCK.phase1EndsAt - now) / 1000));
+        const dgr = lockLeft <= 120;
+        banner.style.background = dgr ? "#fce8e6" : "#e8f0fe";
+        banner.style.color = dgr ? "#c5221f" : "#174ea6";
+        banner.innerHTML = `⏱ Entrega em aula: <span id="timer">${mmss(lockLeft)}</span> · quiz até <b>${hhmm(ENDS_AT)}</b>`;
+        return false;
+      }
+
       if (DISTINCT_DEADLINES <= 1) {
         banner.innerHTML = `Tempo restante: <span id="timer">${mmss(left)}</span>`;
       } else {
@@ -1001,8 +1011,8 @@
     let lockUITimer = 0;
     function scheduleLockUI() { clearTimeout(lockUITimer); lockUITimer = setTimeout(applyLockUIAll, 150); }
 
-    // Per-question markers + the summary card. Local-content aware, so the warning
-    // about an empty "questão da aula" reacts immediately to typing/clearing.
+    // Minimal per-question control (next to Enviar) + the concise summary card.
+    // Local-content aware, so the empty-question warning reacts live to typing.
     function applyLockUIAll() {
       if (!LOCK) return;
       const now = Date.now() + CLOCK_OFFSET;
@@ -1014,24 +1024,17 @@
         if (phase1) {
           ctl.classList.remove("hidden");
           if (qid === effLQ) {
-            const empty = !nonEmptyLocal(qid);
-            ctl.innerHTML =
-              `<span class="lkbadge">★ Questão da aula</span>` +
-              `<div class="lknote${empty ? " empty" : ""}">` +
-              (empty
-                ? "Sem resposta ainda — responda aqui, ou escolha outra questão abaixo."
-                : `Será entregue definitivamente às ${hhmm(LOCK.phase1EndsAt)}. As demais continuam editáveis depois.`) +
-              `</div>`;
+            ctl.innerHTML = `<span class="lkbadge" title="Será entregue definitivamente no fim da etapa em aula">★ Questão da aula</span>`;
           } else {
             const b = document.createElement("button");
             b.type = "button"; b.className = "lkpick";
-            b.textContent = "Escolher como questão da aula";
+            b.textContent = "☆ tornar questão da aula";
             b.addEventListener("click", () => chooseLock(qid));
             ctl.appendChild(b);
           }
         } else if (qid === LOCK.lockQ && s.locked) {
           ctl.classList.remove("hidden");
-          ctl.innerHTML = `<span class="lkbadge frozen">🔒 Entregue definitivamente (questão da aula)</span>`;
+          ctl.innerHTML = `<span class="lkbadge frozen">🔒 entregue</span>`;
         }
       }
       updateLockCard(now);
@@ -1039,46 +1042,44 @@
 
     function updateLockCard(now) {
       const card = $("lockCard"); if (!LOCK) return;
-      card.className = "card"; // reset modifiers
+      card.className = "card";
       const phase1 = now < LOCK.phase1EndsAt;
       if (phase1) {
-        const left = Math.max(0, Math.floor((LOCK.phase1EndsAt - now) / 1000));
         const effLQ = effectiveLockQ();
         const empty = !effLQ || !nonEmptyLocal(effLQ);
-        const qtxt = effLQ ? ("Questão " + state[effLQ].num) : "(nenhuma ainda)";
-        const auto = (!LOCK.lockChosen) ? " — escolhida automaticamente (a 1ª que você responde); toque em “Escolher” em outra para trocar" : "";
         card.classList.add(empty ? "warn" : "okgate");
-        card.innerHTML =
-          `<div class="lkmain">Etapa em aula — termina em <span class="lkclock">${mmss(left)}</span></div>` +
-          `<div class="lksub">Durante este período, responda normalmente. No fim da etapa, <b>uma</b> questão — a sua “questão da aula” — é entregue <b>definitivamente</b> e não poderá mais ser alterada; as demais ficam liberadas até <b>${hhmm(ENDS_AT)}</b>.</div>` +
-          `<div class="lksub">Questão da aula: <b>${qtxt}</b>${auto}.</div>` +
-          (empty
-            ? `<div class="lksub lkwarn">⚠ Sua questão da aula está sem resposta. Se continuar vazia no fim da etapa, o restante do quiz será trancado.</div>`
-            : `<div class="lksub lkok">✓ Questão da aula registrada — o quiz segue liberado até ${hhmm(ENDS_AT)} mesmo depois da aula.</div>`);
+        if (empty) {
+          card.innerHTML =
+            `<div class="lkmain lkwarn">⚠ Escolha sua questão da aula</div>` +
+            `<div class="lksub">Responda ao menos uma questão durante a etapa — senão o quiz é trancado no fim dela. A 1ª que você responder vira a questão da aula (entregue em definitivo); use “☆ tornar questão da aula” para trocar.</div>`;
+        } else {
+          card.innerHTML =
+            `<div class="lkmain lkok">✓ Questão da aula: Questão ${state[effLQ].num}</div>` +
+            `<div class="lksub">Entregue em definitivo no fim da etapa; as demais ficam até ${hhmm(ENDS_AT)}.` +
+            (LOCK.lockChosen ? "" : " (escolha automática — “☆ tornar questão da aula” troca.)") + `</div>`;
+        }
       } else {
         const access = LOCK.gateMet || LOCK.accessOverride;
         if (!access) {
           card.classList.add("shut");
           card.innerHTML =
             `<div class="lkmain lkwarn">Quiz fechado — etapa em aula não concluída</div>` +
-            `<div class="lksub">Nenhuma questão foi entregue na etapa em aula, então o quiz foi trancado. Se isso for um engano, procure o professor para reabrir o seu acesso.</div>`;
+            `<div class="lksub">Se for engano, procure o professor para reabrir seu acesso.</div>`;
         } else {
           card.classList.add("okgate");
-          const qtxt = LOCK.lockQ ? ("Questão " + (state[LOCK.lockQ] ? state[LOCK.lockQ].num : "?")) : "sua questão da aula";
+          const qn = LOCK.lockQ && state[LOCK.lockQ] ? ("Questão " + state[LOCK.lockQ].num) : "Sua questão da aula";
           card.innerHTML =
             `<div class="lkmain lkok">✓ Etapa em aula concluída</div>` +
-            `<div class="lksub"><b>${qtxt}</b> foi entregue definitivamente. As demais questões seguem editáveis até <b>${hhmm(ENDS_AT)}</b>.</div>`;
+            `<div class="lksub">${qn} entregue; as demais ficam editáveis até ${hhmm(ENDS_AT)}.</div>`;
         }
       }
     }
 
     function updateLockPhase(now) {
       if (!LOCK) return;
-      if (now >= LOCK.phase1EndsAt) {
-        if (!phase2Entered) enterPhase2();
-        return;
-      }
-      updateLockCard(now); // tick the phase-1 countdown each second
+      if (now >= LOCK.phase1EndsAt && !phase2Entered) enterPhase2();
+      // (the phase-1 countdown lives in the banner now; the card updates on
+      //  input/refresh/phase-change, not every tick)
     }
 
     async function chooseLock(qid) {

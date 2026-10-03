@@ -133,12 +133,14 @@
     <textarea id="qdesc" placeholder="Instruções gerais…"></textarea>
     <label>Duração (minutos)</label>
     <input id="qdur" type="number" value="480" min="1" />
-    <label>Entrega em aula — janela presencial (minutos, opcional)</label>
-    <input id="qicm" type="number" min="1" placeholder="em branco = desativado (ex.: 30)" />
-    <p class="hint">Se preenchido (e menor que a duração), ativa a <b>entrega em aula</b>: nos primeiros
-      N minutos o aluno responde normalmente; ao fim, <b>uma</b> questão que ele escolher (padrão: a
-      1ª que responder) é entregue <b>definitivamente</b>, e as demais só continuam liberadas se essa
-      questão não estiver vazia. Em branco = quiz comum de fase única.</p>
+    <label>Entrega em aula — janela presencial (minutos)</label>
+    <input id="qicm" type="number" min="1" value="30" placeholder="em branco = desativado" />
+    <p class="hint">Trava <b>1 questão</b> (a escolhida pelo aluno) no fim dessa janela; o resto segue
+      editável até o fim. Em branco = quiz comum.</p>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:14px;cursor:pointer;">
+      <input type="checkbox" id="qproof" style="width:auto;margin:0;">
+      Mostrar ferramentas de demonstração / dedução / árvore na resposta
+    </label>
 
     <div id="questions"></div>
     <div class="row">
@@ -196,6 +198,7 @@
     // Defaults for a NEW quiz (still editable in the form).
     const DEFAULT_DESC = "Esta é uma atividade prática individual sobre o conteúdo visto em aula.  Tente resolver todas as questões e explique brevemente seu raciocínio quando necessário. As respostas não precisam estar perfeitas, mas devem apresentar uma tentativa séria e indicar o que você compreendeu ou onde encontrou dificuldade.";
     const DEFAULT_DUR = 480;
+    const DEFAULT_ICM = 30; // in-class window: on by default for new quizzes
     const loadSession = () => { try { return JSON.parse(localStorage.getItem(SESS_LS) || "null"); } catch { return null; } };
     const saveSession = (s) => localStorage.setItem(SESS_LS, JSON.stringify(s));
     const clearSession = () => localStorage.removeItem(SESS_LS);
@@ -641,7 +644,7 @@
     let editorBaseline = "";      // editor state at last open/save — to detect unsaved edits
     const editorState = () => JSON.stringify({
       id: $("qid").value, title: $("qtitle").value, desc: $("qdesc").value,
-      dur: $("qdur").value, icm: $("qicm").value, qs: collectQuestions(),
+      dur: $("qdur").value, icm: $("qicm").value, proof: $("qproof").checked, qs: collectQuestions(),
     });
     function closeEditor() {
       if (editorState() !== editorBaseline &&
@@ -680,6 +683,7 @@
         $("qdesc").value = q.description || "";
         $("qdur").value = q.durationMinutes || DEFAULT_DUR;
         $("qicm").value = (q.inClassMinutes != null) ? q.inClassMinutes : "";
+        $("qproof").checked = q.showProofTools === true;
         (q.questions || []).forEach((qq) => addQuestion(qq.id, qq.prompt, qq.durationMinutes));
         if (!q.questions || !q.questions.length) addQuestion("q1", "");
       } else {
@@ -687,7 +691,7 @@
         editingOriginalId = null;
         $("qid").value = ""; $("qid").disabled = false;
         $("qtitle").value = ""; $("qdesc").value = DEFAULT_DESC; $("qdur").value = DEFAULT_DUR;
-        $("qicm").value = "";
+        $("qicm").value = DEFAULT_ICM; $("qproof").checked = false;
         addQuestion("q1", "");
       }
       $("editor").classList.remove("hidden");
@@ -750,6 +754,7 @@
         description: $("qdesc").value,
         durationMinutes: parseInt($("qdur").value, 10) || DEFAULT_DUR,
         inClassMinutes: parseInt($("qicm").value, 10) || null,
+        showProofTools: $("qproof").checked,
         questions: collectQuestions(),
       });
       if (ok && data.ok) {

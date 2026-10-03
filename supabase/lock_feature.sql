@@ -20,6 +20,10 @@
 
 alter table quizzes add column if not exists in_class_minutes integer;
 
+-- Per-quiz flag: show the demonstração/dedução/árvore helper tools on the answer
+-- page. Default off (most quizzes don't need them); the admin editor toggles it.
+alter table quizzes add column if not exists show_proof_tools boolean not null default false;
+
 create table if not exists lock_choices (
   id            bigint generated always as identity primary key,
   quiz_id       text        not null,
