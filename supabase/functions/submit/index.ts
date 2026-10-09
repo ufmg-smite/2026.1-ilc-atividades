@@ -188,8 +188,11 @@ async function lockStatus(quiz: any, email: string) {
   const lockQ = choice ?? defaultLockQ(subs);
   const latest = latestByQ(subs);
   const gateMet = !!lockQ && answerNonEmpty(latest[lockQ]);
+  // when the committed answer was received (a receipt the page shows on the
+  // frozen question — a timestamp only, never the answer itself)
+  const lockAt = gateMet ? latest[lockQ!].created_at : null;
   const ov = await lockOverridesFor(quiz.id, email);
-  return { lockQ, isDefault: !choice, gateMet, access: ov.access, question: ov.question };
+  return { lockQ, isDefault: !choice, gateMet, lockAt, access: ov.access, question: ov.question };
 }
 // Decide whether a submission to `qid` by `email` is accepted right now. Folds
 // the global/per-question deadline together with the two-phase lock rules.
@@ -881,7 +884,7 @@ Deno.serve(async (req) => {
       ok: true, active: true, inClassMinutes: M,
       phase1EndsAt: new Date(openedMs + M * 60000).toISOString(),
       lockQuestionId: st.lockQ, isDefault: st.isDefault,
-      lockQuestionEmpty: !st.gateMet, gateMet: st.gateMet,
+      lockQuestionEmpty: !st.gateMet, gateMet: st.gateMet, lockAnsweredAt: st.lockAt,
       phase: minutesSinceOpen(quiz) <= M ? 1 : 2,
       accessOverride: st.access, questionOverride: st.question,
       endsAt: windowState(quiz).endsAt,

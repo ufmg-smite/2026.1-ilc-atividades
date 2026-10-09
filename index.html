@@ -204,8 +204,11 @@
     let QORDER = [];  // question ids in render order
     let SHOW_PROOF = false; // quiz flag: show the demonstração/dedução/árvore helpers
     // In-class-commitment ("entrega em aula") state; null = feature off for this quiz.
-    let LOCK = null;  // { inClassMinutes, phase1EndsAt, lockQ, lockChosen, gateMet, phase, accessOverride, questionOverride }
+    let LOCK = null;  // { inClassMinutes, phase1EndsAt, lockQ, lockChosen, gateMet, lockAt, phase, accessOverride, questionOverride, applied }
     let phase2Entered = false;
+    // Set just before a reload the page does on its own (teacher reopen), so the
+    // reloaded page re-enters the quiz without the student clicking "Começar".
+    const AUTOSTART_KEY = "ilc:autostart";
 
     // ---------- math toolbar ----------
     const SYMBOLS = [
@@ -307,6 +310,11 @@
     // any access). Never let the draft cache break typing or the quiz render.
     function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
     function safeSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+    // The text last accepted by the server for this question (on this device). A
+    // reload compares the draft against it: equal = already sent (shown as such,
+    // not re-sent); different = genuinely unsent edits.
+    function sentKey(qid) { return lsKey(qid) + ":sent"; }
+    function markSent(qid, text) { safeSet(sentKey(qid), text); }
 
     // ---------- photo answers (compress hard, then upload) ----------
     async function compressImage(file) {
@@ -688,14 +696,17 @@
       btn.className = "btn"; btn.textContent = "Enviar resposta";
       const st = document.createElement("span");
       st.className = "save-state";
-      if (saved != null) { st.textContent = "Rascunho salvo localmente"; st.className = "save-state dirty"; }
+      const sentText = safeGet(sentKey(q.id));
+      const textDirty = saved != null && saved !== sentText;
+      if (textDirty) { st.textContent = "Rascunho salvo localmente"; st.className = "save-state dirty"; }
+      else if (saved != null) { st.textContent = "✓ Enviado"; st.className = "save-state ok"; }
       // in-class-commitment control sits next to Enviar (minimal; only when active)
       const lockctl = document.createElement("span");
       lockctl.className = "lockctl hidden";
       foot.appendChild(btn); foot.appendChild(lockctl); foot.appendChild(st);
 
       state[q.id] = {
-        dirty: saved != null, el: ta, st, photos: [],
+        dirty: textDirty, el: ta, st, photos: [],
         num, card, badge, locked: false, lockctl,
         endsAt: q.endsAt ? new Date(q.endsAt).getTime() : ENDS_AT,
       };
@@ -750,10 +761,9 @@
           state[q.id].photos.push(item);
           renderThumb(q.id, item, thumbs);
         }
-        if (sent.length) {
+        if (sent.length && !textDirty) {
           st.textContent = `✓ Enviado com ${sent.length} foto(s)`;
           st.className = "save-state ok";
-          state[q.id].dirty = false;
         }
       } catch {}
 
@@ -789,13 +799,15 @@
         }
 
         const imageIds = s.photos.filter((p) => p.id != null).map((p) => p.id);
+        const answer = ta.value;
         const { ok, status, data } = await api({
           action: "submit", quizId: QUIZ_ID,
           studentName: STUDENT, studentEmail: EMAIL, questionId: qid,
-          answer: ta.value, imageIds,
+          answer, imageIds,
         });
         if (ok && data.ok) {
-          s.dirty = false;
+          markSent(qid, answer);
+          s.dirty = (ta.value !== answer); // typed more while it was sending
           if (s.pst) { s.pst.textContent = ""; s.pst.className = "save-state"; }
           st.textContent = failed
             ? `✓ Enviado — ${failed} foto(s) falharam, toque em Enviar para tentar de novo`
@@ -896,12 +908,13 @@
       if (!s || s.locked) return;
       s.locked = true;
       if (s.dirty) {
+        const answer = s.el.value;
         api({
           action: "submit", quizId: QUIZ_ID,
-          studentName: STUDENT, studentEmail: EMAIL, questionId: qid, answer: s.el.value,
+          studentName: STUDENT, studentEmail: EMAIL, questionId: qid, answer,
           imageIds: s.photos.filter((p) => p.id != null).map((p) => p.id),
         }).then(({ ok, data }) => {
-          if (ok && data.ok) { s.st.textContent = "✓ Enviado (no fechamento)"; s.st.className = "save-state ok"; }
+          if (ok && data.ok) { markSent(qid, answer); s.st.textContent = "✓ Enviado (no fechamento)"; s.st.className = "save-state ok"; }
         }).catch(() => {});
         s.dirty = false;
       }
@@ -914,7 +927,7 @@
     // A 423 on submit means "closed" — the server says whether the whole quiz
     // ended (scope="quiz") or just this question (scope="question").
     function on423(qid, data) {
-      if (data && data.scope === "quiz") lockQuiz("⏱ O tempo terminou — os envios estão fechados.");
+      if (data && data.scope === "quiz") lockQuiz("⏱ " + (data.message || "O tempo terminou — os envios estão fechados."));
       else lockQuestion(qid, "⏱ Tempo desta questão encerrado");
     }
 
@@ -928,13 +941,13 @@
       // best-effort: flush any unsent answers once
       for (const qid in state) {
         if (state[qid].dirty) {
-          const s = state[qid];
+          const s = state[qid], answer = s.el.value;
           await api({
             action: "submit", quizId: QUIZ_ID,
-            studentName: STUDENT, studentEmail: EMAIL, questionId: qid, answer: s.el.value,
+            studentName: STUDENT, studentEmail: EMAIL, questionId: qid, answer,
             imageIds: s.photos.filter((p) => p.id != null).map((p) => p.id),
           }).then(({ ok, data }) => {
-            if (ok && data.ok) { s.st.textContent = "✓ Enviado (no fechamento)"; s.st.className = "save-state ok"; }
+            if (ok && data.ok) { markSent(qid, answer); s.st.textContent = "✓ Enviado (no fechamento)"; s.st.className = "save-state ok"; }
           }).catch(() => {});
         }
         state[qid].el.setAttribute("readonly", "true");
@@ -958,11 +971,14 @@
       for (const qid in state) {
         const s = state[qid];
         if (s.locked || !s.dirty) continue;
+        const answer = s.el.value;
         api({
           action: "submit", quizId: QUIZ_ID,
           studentName: STUDENT, studentEmail: EMAIL, questionId: qid,
-          answer: s.el.value, imageIds: s.photos.filter((p) => p.id != null).map((p) => p.id),
-        }, { keepalive: true, timeoutMs: 8000 }).catch(() => {});
+          answer, imageIds: s.photos.filter((p) => p.id != null).map((p) => p.id),
+        }, { keepalive: true, timeoutMs: 8000 }).then(({ ok, data }) => {
+          if (ok && data.ok) markSent(qid, answer);
+        }).catch(() => {});
       }
     }
     document.addEventListener("visibilitychange", () => {
@@ -980,32 +996,46 @@
       const s = state[qid];
       return !!s && ((s.el.value.trim() !== "") || (s.photos && s.photos.length > 0));
     }
-    // Which question will lock: the explicit pick if any, else the first question
-    // with a (locally) non-empty answer — mirrors the server's default.
+    // Which question will lock: exactly the server's answer — the explicit pick if
+    // any, else the first question whose answer was SENT (not merely typed). The
+    // page never guesses on its own, so what it shows is what freezes at M.
     function effectiveLockQ() {
-      if (!LOCK) return null;
-      if (LOCK.lockChosen && LOCK.lockQ) return LOCK.lockQ;
-      for (const qid of QORDER) if (nonEmptyLocal(qid)) return qid;
-      return LOCK.lockQ || null; // server default (e.g. answered on another device)
+      return LOCK ? (LOCK.lockQ || null) : null;
+    }
+    // Would the questão da aula be empty at M? Unsent local edits count (they are
+    // flushed at M) — so clearing the answer warns at once; otherwise trust the
+    // server's view of what was sent.
+    function lockQEmpty(qid) {
+      if (!qid || !state[qid]) return true;
+      if (state[qid].dirty) return !nonEmptyLocal(qid);
+      return !LOCK.gateMet;
     }
 
+    // Returns true when the server answered (authoritative state now in LOCK).
     async function refreshLockState() {
-      if (!LOCK) return;
-      const prev = { acc: LOCK.accessOverride, q: LOCK.questionOverride };
+      if (!LOCK) return false;
       const { ok, data } = await api({ action: "lockState", quizId: QUIZ_ID, studentEmail: EMAIL });
-      if (!ok || !data.ok || !data.active) return;
+      if (!ok || !data.ok || !data.active) return false;
       LOCK.lockQ = data.lockQuestionId;
       LOCK.lockChosen = !data.isDefault;
       LOCK.gateMet = data.gateMet;
-      LOCK.phase = data.phase;
+      LOCK.lockAt = data.lockAnsweredAt || null;
+      LOCK.phase = phase2Entered ? 2 : data.phase; // never flip back to phase 1
       LOCK.accessOverride = data.accessOverride;
       LOCK.questionOverride = data.questionOverride;
-      // A teacher reopen after we've already entered phase 2 grants more access than
-      // the page currently reflects — reload to re-render cleanly from the drafts.
-      if (phase2Entered && ((LOCK.accessOverride && !prev.acc) || (LOCK.questionOverride && !prev.q))) {
-        location.reload(); return;
+      // A teacher reopen granted AFTER this page applied the phase-2 restrictions
+      // (quiz closed / question frozen) needs a clean re-render. Compare with what
+      // was actually APPLIED — not with the previous poll — so a page that loads
+      // with the reopen already granted just renders it, instead of reloading forever.
+      const A = LOCK.applied;
+      if (A && ((!A.access && (LOCK.gateMet || LOCK.accessOverride)) || (A.frozen && LOCK.questionOverride))) {
+        try { sessionStorage.setItem(AUTOSTART_KEY, "1"); } catch {}
+        location.reload(); return true;
       }
+      // first authoritative state after M (not mid-flush: enterPhase2 applies after it)
+      if (phase2Entered && !A && !LOCK.flushing) { applyPhase2(); return true; }
       applyLockUIAll();
+      return true;
     }
 
     let lockUITimer = 0;
@@ -1046,12 +1076,12 @@
       const phase1 = now < LOCK.phase1EndsAt;
       if (phase1) {
         const effLQ = effectiveLockQ();
-        const empty = !effLQ || !nonEmptyLocal(effLQ);
+        const empty = lockQEmpty(effLQ);
         card.classList.add(empty ? "warn" : "okgate");
         if (empty) {
           card.innerHTML =
             `<div class="lkmain lkwarn">⚠ Escolha sua questão da aula</div>` +
-            `<div class="lksub">Responda ao menos uma questão durante a etapa — senão o quiz é trancado no fim dela. A 1ª que você responder vira a questão da aula (entregue em definitivo); use “☆ tornar questão da aula” para trocar.</div>`;
+            `<div class="lksub">Envie ao menos uma questão durante a etapa — senão o quiz é trancado no fim dela. A 1ª que você enviar vira a questão da aula (entregue em definitivo); use “☆ tornar questão da aula” para trocar.</div>`;
         } else {
           card.innerHTML =
             `<div class="lkmain lkok">✓ Questão da aula: Questão ${state[effLQ].num}</div>` +
@@ -1087,7 +1117,7 @@
       const { ok, status, data } = await api({
         action: "chooseLock", quizId: QUIZ_ID, studentEmail: EMAIL, questionId: qid,
       });
-      if (ok && data.ok) { LOCK.lockQ = qid; LOCK.lockChosen = true; applyLockUIAll(); }
+      if (ok && data.ok) { LOCK.lockQ = qid; LOCK.lockChosen = true; applyLockUIAll(); refreshLockState(); }
       else if (status !== 423) { /* transient — the next refresh will re-sync */ }
     }
 
@@ -1095,38 +1125,52 @@
       if (phase2Entered) return;
       phase2Entered = true;
       LOCK.phase = 2;
-      // Flush every unsent answer, in question order, so the server sees all the
-      // student's in-class work and computes the SAME "first answered" default the
-      // page has been showing — then we freeze exactly the question it locked.
-      for (const qid of QORDER) {
-        const s = state[qid];
-        if (s && s.dirty && !s.locked) { try { await submitOne(qid, s.st, null); } catch {} }
+      // Page open AT the boundary: flush every unsent answer (in question order) so
+      // the in-class work reaches the server inside its 30 s grace. A page opened
+      // LATER must not do this — the frozen question would just be refused and
+      // look "not saved", and an old draft could overwrite a newer answer sent
+      // from another device. Unsent edits there wait for the student's Enviar.
+      const atBoundary = Date.now() + CLOCK_OFFSET < LOCK.phase1EndsAt + 20000;
+      if (atBoundary) {
+        LOCK.flushing = true;
+        for (const qid of QORDER) {
+          const s = state[qid];
+          if (s && s.dirty && !s.locked) { try { await submitOne(qid, s.st, null); } catch {} }
+        }
+        LOCK.flushing = false;
       }
-      await refreshLockState(); // authoritative gate / lockQ now
-      applyPhase2();
+      // Restrictions are applied from the server's state only; if it can't be
+      // reached now, the 20 s poll applies them on its first answer.
+      if (await refreshLockState() && !LOCK.applied) applyPhase2();
     }
 
     function applyPhase2() {
       if (!LOCK) return;
       const access = LOCK.gateMet || LOCK.accessOverride;
+      const freeze = access && !!LOCK.lockQ && !LOCK.questionOverride;
+      LOCK.applied = { access, frozen: freeze };
       if (!access) {
         lockQuiz("⏱ A etapa em aula não foi concluída — o quiz está fechado para você.");
         applyLockUIAll();
         return;
       }
-      if (LOCK.lockQ && !LOCK.questionOverride) freezeLockQuestion(LOCK.lockQ);
+      if (freeze) freezeLockQuestion(LOCK.lockQ);
       applyLockUIAll();
     }
 
-    // Freeze just the committed question (read-only), leaving the rest editable.
+    // Freeze just the committed question (read-only), leaving the rest editable,
+    // with a receipt of when the server received it. Idempotent: it also fixes up
+    // a question an earlier refused send had marked "time is up".
     function freezeLockQuestion(qid) {
       const s = state[qid];
-      if (!s || s.locked) return;
+      if (!s) return;
       s.locked = true;
       s.dirty = false;
       s.el.setAttribute("readonly", "true");
       s.card.querySelectorAll("button, input[type=file], .thumb-rm").forEach((el) => { el.disabled = true; });
-      s.st.textContent = "🔒 Entregue definitivamente (questão da aula)";
+      const at = LOCK.lockAt ? " — recebida às " + hhmm(new Date(LOCK.lockAt).getTime()) : "";
+      const elsewhere = !nonEmptyLocal(qid) ? " (enviada de outro aparelho — o conteúdo não aparece aqui)" : "";
+      s.st.textContent = "🔒 Entregue definitivamente (questão da aula)" + at + elsewhere;
       s.st.className = "save-state ok";
     }
 
@@ -1652,6 +1696,15 @@
       const lineText = `$\\equiv ${f}$${lei}`;
       insertLineAfterCursor(ta, lineText, lineText.length);
     }
+
+    // After a reload the page did on its own (teacher reopen), go straight back
+    // into the quiz with the remembered name/email.
+    try {
+      if (sessionStorage.getItem(AUTOSTART_KEY)) {
+        sessionStorage.removeItem(AUTOSTART_KEY);
+        if ($("name").value.trim() && $("email").value.trim()) start();
+      }
+    } catch {}
   })();
   </script>
 </body>

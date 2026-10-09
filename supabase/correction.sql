@@ -162,8 +162,13 @@ alter table correction_events enable row level security;
 --  state of every answer, with the grader who decided it.
 --  (Pending answers have a null score here — the Edge Function prices those
 --  live from the latest proposal, since their price moves with the barème.)
+--  The current decision is the latest accept/override NOT followed by a
+--  'reopen' ("✕ nota") — the same rule the queue action uses. A reopened answer
+--  is pending again, so it shows a null score here too.
+--  Re-run just this view + the two statements below it to update an existing
+--  database (CREATE OR REPLACE keeps the column list, so it is safe).
 -- ------------------------------------------------------------
-create or replace view correction_current as
+create or replace view correction_current with (security_invoker = on) as
 select
   i.id            as item_id,
   i.run_id,
@@ -183,6 +188,10 @@ from correction_items i
 left join lateral (
   select * from correction_events ev
   where ev.item_id = i.id and ev.kind in ('accept','override')
+    and not exists (
+      select 1 from correction_events ro
+      where ro.item_id = i.id and ro.kind = 'reopen' and ro.created_at > ev.created_at
+    )
   order by ev.created_at desc
   limit 1
 ) e on true;
