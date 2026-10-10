@@ -481,7 +481,7 @@
 
     async function start() {
       STUDENT = $("name").value.trim();
-      EMAIL = $("email").value.trim();
+      EMAIL = $("email").value.trim().toLowerCase(); // the server matches emails exactly
       const msg = $("loginMsg");
       if (!STUDENT) { msg.textContent = "Digite seu nome."; msg.className = "save-state err"; return; }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(EMAIL)) { msg.textContent = "Digite um e-mail válido."; msg.className = "save-state err"; return; }

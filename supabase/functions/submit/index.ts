@@ -842,6 +842,11 @@ Deno.serve(async (req) => {
   }
 
   // ================= STUDENT =================
+  // One canonical form of the student's email (trimmed, lowercase) for every
+  // student action: the in-class gate, the lock pick and the photo checks all
+  // match by exact email, so "Fulano@x.com" in class and "fulano@x.com" at
+  // night must be the same student (a real lockout on 07/10 came from this).
+  if (typeof p.studentEmail === "string") p.studentEmail = p.studentEmail.trim().toLowerCase();
   // No access code: anyone can load the open quiz and submit while it's open.
   // Timing (teacher opens/closes) + the per-student rate limit are the controls.
 
