@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ILC — Minhas correções</title>
+  <meta name="robots" content="noindex" />
+  <script src="lib/purify.min.js"></script>
+  <style>
+    :root { --accent:#673ab7; --bg:#f0ebf8; --line:#dadce0; --ok:#1e7b3a; --no:#b3261e; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Roboto, Arial, sans-serif; background: var(--bg);
+           margin: 0; padding: 20px 12px 60px; color: #202124; }
+    .card { max-width: 760px; margin: 0 auto 14px; background: #fff; border: 1px solid var(--line);
+            border-radius: 8px; padding: 18px 20px; }
+    .top { border-top: 10px solid var(--accent); }
+    h1 { font-size: 24px; margin: 2px 0 8px; font-weight: 500; }
+    .desc { color: #444; font-size: 14px; line-height: 1.5; margin: 0; }
+    label.fld { display: block; font-size: 13px; color: #5f6368; margin: 14px 0 6px; }
+    input[type=text] { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+    .chk { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #444; margin-top: 12px; }
+    .row { display: flex; align-items: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+    .btn { background: var(--accent); color: #fff; border: 0; padding: 9px 20px; border-radius: 6px;
+           font: inherit; font-size: 14px; cursor: pointer; }
+    .btn.ghost { background: #fff; color: var(--accent); border: 1px solid var(--accent); }
+    .btn:disabled { opacity: .6; cursor: default; }
+    .msg { font-size: 13px; color: #5f6368; } .msg.err { color: var(--no); } .msg.ok { color: var(--ok); }
+    .hidden { display: none !important; }
+    .bar-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    /* summary */
+    .big { font-size: 40px; font-weight: 700; line-height: 1; margin: 10px 0 4px; }
+    .big small { font-size: 17px; color: #777; font-weight: 400; }
+    .scale { font-size: 12.5px; color: #666; margin: 4px 0 12px; line-height: 1.4; }
+    table.sum { width: 100%; border-collapse: collapse; font-size: 14px; }
+    table.sum td { padding: 8px 4px; border-bottom: 1px solid #eee; }
+    .bar { height: 9px; background: #eee; border-radius: 5px; min-width: 70px; }
+    .bar i { display: block; height: 100%; background: #3b6ea5; border-radius: 5px; }
+    .enc { background: #eef6ef; border-left: 4px solid #2e7d4f; padding: 10px 14px; margin-top: 14px; font-size: 14px; line-height: 1.45; }
+    .rev { border: 1px solid #d6dde6; border-radius: 6px; padding: 10px 14px; margin-top: 14px; font-size: 14px; }
+    .rev h3 { margin: 0 0 4px; font-size: 15px; } .rev ul { margin: 6px 0 0 18px; padding: 0; } .rev li { margin: 4px 0; line-height: 1.4; }
+    /* question */
+    .qhead { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .qtitle { font-size: 17px; font-weight: 600; }
+    .score { font-size: 26px; font-weight: 700; } .score small { font-size: 15px; color: #777; font-weight: 400; }
+    .grader { font-size: 13px; color: #666; margin-top: 2px; }
+    table.crit { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+    table.crit td { padding: 7px 4px; border-bottom: 1px solid #eee; vertical-align: top; }
+    table.crit td.mark { width: 22px; font-weight: 700; font-size: 16px; }
+    table.crit td.pts { text-align: right; white-space: nowrap; width: 72px; }
+    .lab { font-weight: 600; } .det { color: #666; font-size: 12.5px; }
+    tr.miss .lab, tr.miss td.pts { color: #888; }
+    .okm { color: var(--ok); } .nom { color: var(--no); }
+    .adj { background: #fbf3e6; border-left: 4px solid #c07f2a; padding: 8px 12px; margin-top: 10px; font-size: 13.5px; }
+    .scans { margin-top: 12px; text-align: center; }
+    .scans a { display: block; margin: 0 auto 10px; }
+    .scans img { max-width: 100%; border: 1px solid #ccc; border-radius: 4px; }
+    .hint { font-size: 12px; color: #777; }
+    .gab { background: #eef3f7; border-left: 4px solid #3b6ea5; padding: 10px 14px; margin-top: 12px; font-size: 14px; line-height: 1.5; overflow-x: auto; }
+    .gab h3 { margin: 0 0 4px; font-size: 14.5px; color: #2c5580; } .gab p { margin: 4px 0; }
+    .gab .lei { color: #6b6b6b; font-size: 12.5px; } .gab img { max-width: 100%; }
+    @media print {
+      body { background: #fff; padding: 0; }
+      .noprint { display: none !important; }
+      .card { border: 0; padding: 0; max-width: none; }
+      .qcard { break-before: page; }
+      .scans img { max-height: 170mm; }
+      .gab, .adj, .enc { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="card top noprint">
+    <h1>Minhas correções</h1>
+    <p class="desc">DCC 638 — Introdução à Lógica Computacional. Veja aqui a correção das suas provas.</p>
+  </div>
+
+  <!-- login -->
+  <div class="card noprint" id="loginCard">
+    <p class="desc">Use a sua matrícula e o código de acesso pessoal que você recebeu por e-mail.</p>
+    <label class="fld" for="mat">Matrícula</label>
+    <input type="text" id="mat" inputmode="numeric" autocomplete="off" placeholder="Ex.: 2026012345" />
+    <label class="fld" for="code">Código de acesso</label>
+    <input type="text" id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXXX-XXXXX" />
+    <label class="chk"><input type="checkbox" id="remember" /> Lembrar neste aparelho</label>
+    <div class="row">
+      <button class="btn" id="go">Ver correções</button>
+      <span class="msg" id="msg"></span>
+    </div>
+  </div>
+
+  <!-- logged in -->
+  <div id="view" class="hidden">
+    <div class="card noprint">
+      <div class="bar-top">
+        <span id="hello"></span>
+        <span>
+          <button class="btn ghost" id="print">Imprimir / salvar PDF</button>
+          <button class="btn ghost" id="logout">Sair</button>
+        </span>
+      </div>
+    </div>
+    <div id="exams"></div>
+  </div>
+
+<script>
+(function () {
+  const FUNCTION_URL = "https://rftveyvbitiysymutdir.supabase.co/functions/v1/relatorios";
+  const KEY = "ilc:correcoes:login";   // only when "Lembrar neste aparelho" is ticked
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const fmt = (x) => { const r = Math.round(Number(x) * 100) / 100; return (Number.isInteger(r) ? String(r) : r.toFixed(1)).replace(".", ","); };
+  const store = { get() { try { return JSON.parse(localStorage.getItem(KEY) || "null"); } catch { return null; } },
+                  set(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch {} },
+                  clear() { try { localStorage.removeItem(KEY); } catch {} } };
+
+  async function call(payload) {
+    const ctrl = new AbortController(), t = setTimeout(() => ctrl.abort(), 30000);
+    try {
+      const r = await fetch(FUNCTION_URL, { method: "POST", headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify(payload), signal: ctrl.signal });
+      let data = {}; try { data = await r.json(); } catch {}
+      return { ok: r.ok, status: r.status, data };
+    } catch { return { ok: false, status: 0, data: {} }; }
+    finally { clearTimeout(t); }
+  }
+
+  async function login(mat, code, remember) {
+    const msg = $("msg");
+    mat = String(mat || "").replace(/\D/g, ""); code = String(code || "").trim();
+    if (!mat || !code) { msg.textContent = "Informe a matrícula e o código."; msg.className = "msg err"; return; }
+    msg.textContent = "Verificando…"; msg.className = "msg"; $("go").disabled = true;
+    const { ok, status, data } = await call({ action: "report", matricula: mat, code });
+    $("go").disabled = false;
+    if (!(ok && data.ok)) {
+      msg.textContent = status === 0 ? "Sem conexão — tente de novo." : (data.message || "Não foi possível verificar.");
+      msg.className = "msg err";
+      if (status === 403) store.clear();     // a remembered code that no longer works
+      return;
+    }
+    if (remember) store.set({ mat, code }); else store.clear();
+    msg.textContent = "";
+    render(data);
+  }
+
+  function render(data) {
+    $("loginCard").classList.add("hidden");
+    $("view").classList.remove("hidden");
+    $("hello").textContent = "Olá, " + titleCase(String(data.nome || "").split(" ")[0]) + "!";
+    const box = $("exams"); box.innerHTML = "";
+    if (!data.exams || !data.exams.length) {
+      const c = el("div", "card"); c.appendChild(el("p", "desc", "Nenhuma correção disponível ainda."));
+      box.appendChild(c); return;
+    }
+    for (const ex of data.exams) renderExam(box, ex, data.nome);
+  }
+  const titleCase = (s) => s.toLowerCase().replace(/(^|\s)\S/g, (m) => m.toUpperCase());
+
+  function renderExam(box, ex, nome) {
+    // ---- summary ----
+    const s = el("div", "card top");
+    s.appendChild(el("h1", null, ex.title + " — correção individual"));
+    s.appendChild(el("p", "desc", titleCase(String(nome || ""))));
+    const big = el("div", "big");
+    if (ex.grade === null) big.textContent = "Em correção";
+    else { big.textContent = ex.grade + " "; big.appendChild(el("small", null, "/ 100")); }
+    s.appendChild(big);
+    if (ex.grade !== null) s.appendChild(el("div", "scale",
+      `${fmt(ex.points)} pontos de ${fmt(ex.maxPoints)} no barema. A nota foi normalizada considerando ` +
+      `${fmt(ex.notaBase)} pontos como nota máxima (nota = pontos ÷ ${fmt(ex.notaBase)} × 100, limitada a 100).`));
+    const t = el("table", "sum");
+    for (const q of ex.questions) {
+      const tr = el("tr");
+      tr.appendChild(el("td", null, "Questão " + q.numero));
+      tr.appendChild(el("td", null, q.titulo));
+      const bt = el("td"); const bar = el("div", "bar"); const fill = el("i");
+      fill.style.width = (q.score === null || !q.max ? 0 : Math.round(100 * q.score / q.max)) + "%";
+      bar.appendChild(fill); bt.appendChild(bar); tr.appendChild(bt);
+      const sc = el("td"); sc.style.textAlign = "right"; sc.style.whiteSpace = "nowrap";
+      sc.appendChild(el("b", null, q.score === null ? "—" : fmt(q.score))); sc.appendChild(document.createTextNode(" / " + fmt(q.max)));
+      tr.appendChild(sc); t.appendChild(tr);
+    }
+    s.appendChild(t);
+    if (ex.grade !== null && ex.grade < 50) {
+      const e = el("div", "enc");
+      e.appendChild(el("b", null, "Ainda há bastante caminho pela frente. "));
+      e.appendChild(document.createTextNode("Esta prova vale 30% da nota final; as duas próximas provas e os exercícios " +
+        "completam os outros 70%. Use as questões abaixo para entender cada ponto que faltou — o gabarito está logo " +
+        "depois de cada resposta — e não hesite em procurar os monitores ou os professores para tirar dúvidas."));
+      s.appendChild(e);
+    }
+    const rev = el("div", "rev"); rev.appendChild(el("h3", null, "Pontos a revisar"));
+    const ul = el("ul");
+    for (const q of ex.questions) {
+      const miss = q.criteria.filter((c) => !c.met);
+      if (!miss.length) continue;
+      const li = el("li"); li.appendChild(el("b", null, `Questão ${q.numero} — ${q.titulo}: `));
+      li.appendChild(document.createTextNode(miss.map((c) => (c.detail || c.label).replace(/\.\s*$/, "")).join("; ") + "."));
+      ul.appendChild(li);
+    }
+    if (ul.children.length) { rev.appendChild(el("div", "hint", "Critérios do barema que não foram atendidos nesta prova:")); rev.appendChild(ul); }
+    else rev.appendChild(el("div", null, "Todos os critérios do barema foram atendidos. Parabéns!"));
+    s.appendChild(rev);
+    box.appendChild(s);
+
+    // ---- one card per question ----
+    for (const q of ex.questions) {
+      const c = el("div", "card qcard");
+      const head = el("div", "qhead");
+      const left = el("div"); left.appendChild(el("div", "qtitle", `Questão ${q.numero} · ${q.titulo}`));
+      if (q.grader) left.appendChild(el("div", "grader", "Corrigida por " + q.grader));
+      const sc = el("div", "score", q.score === null ? "—" : fmt(q.score) + " ");
+      sc.appendChild(el("small", null, "/ " + fmt(q.max)));
+      head.appendChild(left); head.appendChild(sc); c.appendChild(head);
+
+      const ct = el("table", "crit");
+      for (const k of q.criteria) {
+        const tr = el("tr", k.met ? "" : "miss");
+        tr.appendChild(el("td", "mark " + (k.met ? "okm" : "nom"), k.met ? "✓" : "✗"));
+        const td = el("td"); td.appendChild(el("div", "lab", k.label)); if (k.detail) td.appendChild(el("div", "det", k.detail));
+        tr.appendChild(td);
+        tr.appendChild(el("td", "pts", `${fmt(k.met ? k.pts : 0)} / ${fmt(k.pts)}`));
+        ct.appendChild(tr);
+      }
+      c.appendChild(ct);
+      if (q.delta) {
+        const a = el("div", "adj");
+        a.appendChild(el("b", null, `Ajuste do corretor: ${q.delta > 0 ? "+" : "−"}${fmt(Math.abs(q.delta))}`));
+        a.appendChild(document.createTextNode(q.delta > 0
+          ? " — crédito por elementos corretos da resposta que o barema não previa."
+          : " — imprecisão na resposta que impede a nota máxima, embora os critérios tenham sido atendidos."));
+        c.appendChild(a);
+      }
+      if (q.scans.length) {
+        const sw = el("div", "scans");
+        for (const u of q.scans) {
+          const a = el("a"); a.href = u; a.target = "_blank"; a.rel = "noopener";
+          const img = el("img"); img.src = u; img.alt = "Resposta digitalizada"; img.loading = "lazy";
+          a.appendChild(img); sw.appendChild(a);
+        }
+        sw.appendChild(el("div", "hint noprint", "Toque na imagem para abrir em tamanho original."));
+        c.appendChild(sw);
+      }
+      if (q.gabaritoHtml) {
+        const g = el("div", "gab"); g.appendChild(el("h3", null, "Gabarito"));
+        const body = el("div");
+        body.innerHTML = window.DOMPurify ? DOMPurify.sanitize(q.gabaritoHtml) : "";
+        g.appendChild(body); c.appendChild(g);
+      }
+      box.appendChild(c);
+    }
+  }
+
+  $("go").addEventListener("click", () => login($("mat").value, $("code").value, $("remember").checked));
+  $("code").addEventListener("keydown", (e) => { if (e.key === "Enter") $("go").click(); });
+  $("print").addEventListener("click", () => window.print());
+  $("logout").addEventListener("click", () => {
+    store.clear();
+    $("view").classList.add("hidden"); $("exams").innerHTML = "";
+    $("loginCard").classList.remove("hidden");
+    $("code").value = ""; $("remember").checked = false;
+  });
+  const saved = store.get();
+  if (saved && saved.mat && saved.code) {
+    $("mat").value = saved.mat; $("remember").checked = true;
+    login(saved.mat, saved.code, true);
+  }
+})();
+</script>
+</body>
+</html>
