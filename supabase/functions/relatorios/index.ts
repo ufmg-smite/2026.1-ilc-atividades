@@ -109,7 +109,7 @@ async function buildExam(run: any, studentKey: string) {
     rows(`correction_events?item_id=in.${inList(items.map((i) => i.id))}&kind=in.(accept,override,reopen)` +
       `&select=item_id,kind,score,criteria,rubric,actor_email,created_at&order=created_at.asc`),
     rows(`correction_criteria?run_id=eq.${encodeURIComponent(run.run_id)}&question_id=in.${inList(qids)}` +
-      `&select=question_id,key,label,detail,position`),
+      `&active=eq.true&select=question_id,key,label,detail,points,position`),
     rows(`report_questions?run_id=eq.${encodeURIComponent(run.run_id)}&question_id=in.${inList(qids)}` +
       `&select=question_id,numero,titulo,gabarito_html`),
     rows(`staff?select=email,name`),
@@ -138,15 +138,15 @@ async function buildExam(run: any, studentKey: string) {
   const questions = items.map((it) => {
     const d = dec[it.id];
     const meta = qmeta[it.question_id] || {};
-    const cmeta: Record<string, any> = {};
-    for (const c of crit) if (c.question_id === it.question_id) cmeta[c.key] = c;
-    const rubric: Record<string, number> = d ? (d.rubric || {}) : {};
-    const keys = Object.keys(rubric).sort((a, b) => (cmeta[a]?.position ?? 99) - (cmeta[b]?.position ?? 99));
-    const criteria = keys.map((k) => ({
-      label: cmeta[k]?.label ?? k, detail: cmeta[k]?.detail ?? "",
-      pts: Number(rubric[k]), met: !!(d?.criteria?.[k]?.met),
+    // The CURRENT barème (labels, points, max) with the grader's ticks. A grade
+    // given under an earlier barème keeps its frozen score; its ticks map by key.
+    const qcrit = crit.filter((c) => c.question_id === it.question_id)
+      .sort((a, b) => (a.position ?? 99) - (b.position ?? 99));
+    const criteria = qcrit.map((c) => ({
+      label: c.label ?? c.key, detail: c.detail ?? "",
+      pts: Number(c.points), met: !!(d?.criteria?.[c.key]?.met),
     }));
-    const max = keys.reduce((s, k) => s + Number(rubric[k]), 0);
+    const max = criteria.reduce((s, c) => s + c.pts, 0);
     const sumMet = criteria.reduce((s, c) => s + (c.met ? c.pts : 0), 0);
     const score = d ? Number(d.score) : null;
     if (score === null) allGraded = false; else { points += score; maxPoints += max; }

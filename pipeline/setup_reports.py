@@ -75,6 +75,7 @@ def cmd_run(a):
     order = booklet_order(a.run)
     gpath = os.path.join(DADOS, "relatorios", "gabaritos", f"{a.run}.json")
     gab = json.load(open(gpath, encoding="utf-8")) if os.path.exists(gpath) else {}
+    gab = {k: v for k, v in gab.items() if not k.startswith("_")}   # "_note" etc. are comments
     rows = []
     for qid in qids:
         t = qid.split("_", 1)[1]
