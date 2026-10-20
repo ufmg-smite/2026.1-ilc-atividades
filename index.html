@@ -236,7 +236,10 @@
         <label class="fld" for="rpMat">Matrícula</label>
         <input id="rpMat" inputmode="numeric" autocomplete="off" placeholder="Ex.: 2026012345" />
         <label class="fld" for="rpCode">Código de acesso</label>
-        <input id="rpCode" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXXX-XXXXX" />
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="rpCode" type="password" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXXX-XXXXX" />
+          <button type="button" class="btn rp-ghost" id="rpShow" style="padding:9px 12px;white-space:nowrap">Mostrar</button>
+        </div>
         <label class="rp-chk"><input type="checkbox" id="rpRemember" /> Lembrar neste aparelho</label>
         <div class="qfoot">
           <button class="btn" id="rpGo" type="button">Ver correções</button>
@@ -1886,11 +1889,9 @@
       if (ex.medianGrade != null) s.appendChild(el("div", "rp-legend",
         `Barra azul: sua nota na questão · traço laranja: mediana da turma. Mediana da turma na prova: ${fmt(ex.medianGrade)} / 100.`));
       if (ex.grade !== null && ex.grade < 50) {
-        const e = el("div", "rp-enc");
-        e.appendChild(el("b", null, "Ainda há bastante caminho pela frente. "));
-        e.appendChild(document.createTextNode("Esta prova vale 30% da nota final; as duas próximas provas e os exercícios " +
-          "completam os outros 70%. Use as questões abaixo para entender cada ponto que faltou — o gabarito está logo " +
-          "depois de cada resposta — e não hesite em procurar os monitores ou os professores para tirar dúvidas."));
+        const e = el("div", "rp-enc", "A Prova 1 é só uma parte da nota: ela vale 30%, e ainda temos mais duas provas " +
+          "e os exercícios. Revise com calma as questões abaixo, comparando sua resposta com o gabarito, e procure os " +
+          "monitores ou os professores se tiver dúvidas.");
         s.appendChild(e);
       }
       const rev = el("div", "rp-rev"); rev.appendChild(el("h3", null, "Pontos a revisar"));
@@ -1930,7 +1931,7 @@
           a.appendChild(el("b", null, `Ajuste do corretor: ${q.delta > 0 ? "+" : "−"}${fmt(Math.abs(q.delta))}`));
           a.appendChild(document.createTextNode(q.delta > 0
             ? " — crédito por elementos corretos da resposta que o barema não previa."
-            : " — imprecisão na resposta que impede a nota máxima, embora os critérios tenham sido atendidos."));
+            : " — desconto por imprecisões na resposta que os critérios do barema não cobrem."));
           c.appendChild(a);
         }
         if (q.scans.length) {
@@ -1955,6 +1956,11 @@
       }
     }
 
+    $("rpShow").addEventListener("click", () => {
+      const hidden = $("rpCode").type === "password";
+      $("rpCode").type = hidden ? "text" : "password";
+      $("rpShow").textContent = hidden ? "Ocultar" : "Mostrar";
+    });
     $("rpGo").addEventListener("click", login);
     $("rpCode").addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
     $("rpBack").addEventListener("click", () => showView(false));
@@ -1966,6 +1972,7 @@
     $("rpLogout").addEventListener("click", () => {
       store.clear();
       $("rpExams").innerHTML = ""; $("rpCode").value = ""; $("rpRemember").checked = false;
+      $("rpCode").type = "password"; $("rpShow").textContent = "Mostrar";
       showView(false);
     });
     // remembered login: pre-fill only (the quiz login stays the default screen)

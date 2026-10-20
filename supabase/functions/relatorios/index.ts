@@ -28,7 +28,8 @@ const CORS = {
 const SUPA_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BUCKET = "answers";
-const FAIL_MAX_IP = 20;        // failed attempts per IP...
+const FAIL_MAX_IP = 100;       // failed attempts per IP (high: a campus NAT is shared by a whole class;
+                               // with ~8e14 possible codes, guessing stays hopeless)...
 const FAIL_WINDOW_SEC = 900;   // ...per 15 minutes
 const URL_TTL_SEC = 3600;      // scan links: 1 hour (the page loads them at once)
 const DUMMY_SALT = "00000000000000000000000000000000";
