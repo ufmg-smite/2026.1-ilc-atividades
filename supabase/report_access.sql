@@ -14,3 +14,8 @@ create table if not exists report_access (
 );
 create index if not exists report_access_mat_idx on report_access (matricula, at);
 alter table report_access enable row level security;
+
+-- Explicit grant (Supabase stops auto-granting new public tables on 2026-10-30).
+-- ONLY to service_role (the Edge Functions); never to anon/authenticated — the
+-- public key in the pages must not reach these tables (RLS stays deny-all too).
+grant select, insert on report_access to service_role;

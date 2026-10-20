@@ -63,3 +63,11 @@ create table if not exists report_questions (
   primary key (run_id, question_id)
 );
 alter table report_questions enable row level security;
+
+-- Explicit grant (Supabase stops auto-granting new public tables on 2026-10-30).
+-- ONLY to service_role (the Edge Functions); never to anon/authenticated — the
+-- public key in the pages must not reach these tables (RLS stays deny-all too).
+grant select, insert, update, delete on student_access   to service_role;
+grant select, insert, update, delete on report_students  to service_role;
+grant select, insert, update, delete on report_runs      to service_role;
+grant select, insert, update, delete on report_questions to service_role;
