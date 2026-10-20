@@ -16,6 +16,7 @@ Subcommands (run supabase/student_reports.sql first):
   test        two staff test accounts (preview: they see unpublished runs), linked to two
               real booklets; their codes are written to dados/relatorios/acesso/teste.csv.
   publish     set report_runs.published (--off to hide again).
+  acessos     who opened their correction and when (report_access); --faltam lists who has not.
 
     /home/dap/miniconda3/bin/python3 setup_reports.py access
     /home/dap/miniconda3/bin/python3 setup_reports.py run --run dcc638-prova1 --title "Prova 1" --base 25
@@ -127,6 +128,41 @@ def cmd_test(a):
     for o in out:
         print(f"test account {o['matricula']} -> {o['booklet']}  code {o['codigo']}")
 
+def cmd_acessos(a):
+    """Who opened their correction (report_access): first/last access and count per
+    student, plus who has not opened it yet. Writes dados/relatorios/acesso/acessos.csv."""
+    from datetime import datetime, timezone, timedelta
+    br = timezone(timedelta(hours=-3))
+    fmt = lambda iso: datetime.fromisoformat(iso).astimezone(br).strftime("%d/%m %H:%M")
+    rows, off = [], 0
+    while True:
+        r = supa.get(f"report_access?select=matricula,at&order=at.asc&limit=1000&offset={off}")
+        rows += r
+        if len(r) < 1000:
+            break
+        off += 1000
+    seen = defaultdict(list)
+    for r in rows:
+        seen[r["matricula"]].append(r["at"])
+    linked = {l["matricula"] for l in supa.get(f"report_students?run_id=eq.{a.run}&select=matricula&limit=5000")}
+    people = [r for r in csv.DictReader(open(ACCESS_CSV, encoding="utf-8")) if r["matricula"] in linked]
+    out = []
+    for p in sorted(people, key=lambda r: r["nome"]):
+        t = seen.get(p["matricula"], [])
+        out.append(dict(nome=p["nome"], matricula=p["matricula"], turma=p["turma"], email=p["email"],
+                        acessos=len(t), primeiro=fmt(t[0]) if t else "", ultimo=fmt(t[-1]) if t else ""))
+    path = os.path.join(DADOS, "relatorios", "acesso", "acessos.csv")
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=list(out[0])); w.writeheader(); w.writerows(out)
+    os.chmod(path, 0o600)
+    opened = [o for o in out if o["acessos"]]
+    print(f"{len(opened)}/{len(out)} students with a graded exam opened their correction ({len(rows)} accesses in total)")
+    print(f"details: {path}")
+    if a.faltam:
+        for o in out:
+            if not o["acessos"]:
+                print(f"  not yet: {o['nome']} ({o['matricula']}, {o['turma']}) {o['email']}")
+
 def cmd_publish(a):
     supa.patch(f"report_runs?run_id=eq.{a.run}", dict(published=not a.off))
     print(f"{a.run}: published = {not a.off}")
@@ -135,7 +171,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("access")
-    for name in ("run", "link", "test", "publish"):
+    for name in ("run", "link", "test", "publish", "acessos"):
         s = sub.add_parser(name)
         s.add_argument("--run", default="dcc638-prova1")
         if name == "run":
@@ -143,5 +179,8 @@ if __name__ == "__main__":
             s.add_argument("--base", type=float, default=25)
         if name == "publish":
             s.add_argument("--off", action="store_true")
+        if name == "acessos":
+            s.add_argument("--faltam", action="store_true", help="also list who has not opened it yet")
     a = ap.parse_args()
-    {"access": cmd_access, "run": cmd_run, "link": cmd_link, "test": cmd_test, "publish": cmd_publish}[a.cmd](a)
+    {"access": cmd_access, "run": cmd_run, "link": cmd_link, "test": cmd_test, "publish": cmd_publish,
+     "acessos": cmd_acessos}[a.cmd](a)

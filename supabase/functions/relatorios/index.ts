@@ -16,7 +16,8 @@
 //  matrícula — nothing the page sends selects whose data is read. Failed
 //  attempts are throttled per IP. Scans are short-lived signed URLs to the
 //  images already in the private `answers` bucket (no copies, no PDFs).
-//  Tables: supabase/student_reports.sql (+ the existing correction_* tables).
+//  Tables: supabase/student_reports.sql, supabase/report_access.sql (+ the
+//  existing correction_* tables). Successful accesses are logged (matrícula + time).
 // ============================================================
 
 const CORS = {
@@ -222,6 +223,17 @@ Deno.serve(async (req) => {
     if (!acc || !sameHex(h, acc.code_hash)) {
       await failHit(`relat:ip:${ip}`);
       return json({ error: "denied", message: "Matrícula ou código incorretos." }, 403);
+    }
+
+    // access log (supabase/report_access.sql): matrícula + time only; test accounts
+    // are not counted, and a failed write never blocks the student's correction
+    // (awaited: the runtime may stop the worker once the response is sent)
+    if (!acc.preview) {
+      try {
+        const r = await db(`report_access`, { method: "POST", headers: { Prefer: "return=minimal" },
+                                              body: JSON.stringify({ matricula: acc.matricula }) });
+        if (!r.ok) console.error("report_access", r.status);
+      } catch (e) { console.error("report_access", e); }
     }
 
     // everything below is keyed on the VERIFIED matrícula only
