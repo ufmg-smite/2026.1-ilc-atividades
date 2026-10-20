@@ -152,7 +152,51 @@
     .ndb-foot { display:flex; gap:8px; flex-wrap:wrap; padding:10px 14px; border-top:1px solid var(--line); }
     .ndb-foot button { flex:1; min-width:110px; padding:10px; border:1px solid var(--line); border-radius:6px; background:#f5f2fb; font-size:14px; cursor:pointer; }
     .ndb-foot .primary { background:var(--accent); color:#fff; border-color:var(--accent); }
-  </style>
+      /* ===== "Minhas correções" (students' own exam corrections; all classes rp-*) ===== */
+    .rp-toggle { background:none; border:0; color:var(--accent); font:inherit; font-size:15px; font-weight:500;
+                 cursor:pointer; padding:0; text-align:left; }
+    .rp-chk { display:flex; align-items:center; gap:8px; font-size:14px; color:#444; margin-top:12px; }
+    .rp-chk input { width:auto; }
+    .rp-bar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+    .rp-ghost { background:#fff; color:var(--accent); border:1px solid var(--accent); }
+    .rp-big { font-size:40px; font-weight:700; line-height:1; margin:10px 0 4px; }
+    .rp-big small { font-size:17px; color:#777; font-weight:400; }
+    .rp-scale { font-size:12.5px; color:#666; margin:4px 0 12px; line-height:1.4; }
+    table.rp-sum { width:100%; border-collapse:collapse; font-size:14px; }
+    table.rp-sum td { padding:8px 4px; border-bottom:1px solid #eee; }
+    .rp-barq { height:9px; background:#eee; border-radius:5px; min-width:70px; }
+    .rp-barq i { display:block; height:100%; background:#3b6ea5; border-radius:5px; }
+    .rp-enc { background:#eef6ef; border-left:4px solid #2e7d4f; padding:10px 14px; margin-top:14px; font-size:14px; line-height:1.45; }
+    .rp-rev { border:1px solid #d6dde6; border-radius:6px; padding:10px 14px; margin-top:14px; font-size:14px; }
+    .rp-rev h3 { margin:0 0 4px; font-size:15px; } .rp-rev ul { margin:6px 0 0 18px; padding:0; } .rp-rev li { margin:4px 0; line-height:1.4; }
+    .rp-qhead { display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; }
+    .rp-qtitle { font-size:17px; font-weight:600; }
+    .rp-score { font-size:26px; font-weight:700; } .rp-score small { font-size:15px; color:#777; font-weight:400; }
+    .rp-grader { font-size:13px; color:#666; margin-top:2px; }
+    table.rp-crit { width:100%; border-collapse:collapse; margin-top:10px; font-size:14px; }
+    table.rp-crit td { padding:7px 4px; border-bottom:1px solid #eee; vertical-align:top; }
+    table.rp-crit td.rp-mark { width:22px; font-weight:700; font-size:16px; }
+    table.rp-crit td.rp-pts { text-align:right; white-space:nowrap; width:72px; }
+    .rp-lab { font-weight:600; } .rp-det { color:#666; font-size:12.5px; }
+    tr.rp-miss .rp-lab, tr.rp-miss td.rp-pts { color:#888; }
+    .rp-ok { color:#1e7b3a; } .rp-no { color:#b3261e; }
+    .rp-adj { background:#fbf3e6; border-left:4px solid #c07f2a; padding:8px 12px; margin-top:10px; font-size:13.5px; }
+    .rp-scans { margin-top:12px; text-align:center; }
+    .rp-scans a { display:block; margin:0 auto 10px; }
+    .rp-scans img { max-width:100%; border:1px solid #ccc; border-radius:4px; }
+    .rp-hint { font-size:12px; color:#777; }
+    .rp-gab { background:#eef3f7; border-left:4px solid #3b6ea5; padding:10px 14px; margin-top:12px; font-size:14px; line-height:1.5; overflow-x:auto; }
+    .rp-gab h3 { margin:0 0 4px; font-size:14.5px; color:#2c5580; } .rp-gab p { margin:4px 0; }
+    .rp-gab .lei { color:#6b6b6b; font-size:12.5px; } .rp-gab img { max-width:100%; }
+    @media print {
+      body.rp-printing { background:#fff; padding:0; }
+      body.rp-printing .rp-noprint, body.rp-printing #banner { display:none !important; }
+      body.rp-printing .card { border:0; padding:0; max-width:none; }
+      body.rp-printing .rp-qcard { break-before:page; }
+      body.rp-printing .rp-scans img { max-height:170mm; }
+      body.rp-printing .rp-gab, body.rp-printing .rp-adj, body.rp-printing .rp-enc { break-inside:avoid; }
+    }
+</style>
 </head>
 <body>
   <!-- ===== CONFIG ===== -->
@@ -179,11 +223,37 @@
         <span id="loginMsg" class="save-state"></span>
       </div>
     </div>
-    <!-- link to the students' own corrections (separate page: correcoes.html) -->
-    <div class="card">
-      <a href="correcoes.html" style="color:var(--accent);font-size:15px;font-weight:500;text-decoration:none">📄 Minhas correções (provas) →</a>
-      <p class="desc" style="margin:6px 0 0">Veja a correção das suas provas com a sua matrícula e o código pessoal enviado por e-mail.</p>
+    <!-- ===== MINHAS CORREÇÕES: entry (independent of the quiz; own script below) ===== -->
+    <div class="card" id="rpEntry">
+      <button type="button" class="rp-toggle" id="rpToggle">📄 Minhas correções (provas) ▸</button>
+      <div id="rpForm" class="hidden">
+        <p class="desc">Use a sua matrícula e o código de acesso pessoal que você recebeu por e-mail.</p>
+        <label class="fld" for="rpMat">Matrícula</label>
+        <input id="rpMat" inputmode="numeric" autocomplete="off" placeholder="Ex.: 2026012345" />
+        <label class="fld" for="rpCode">Código de acesso</label>
+        <input id="rpCode" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXXX-XXXXX" />
+        <label class="rp-chk"><input type="checkbox" id="rpRemember" /> Lembrar neste aparelho</label>
+        <div class="qfoot">
+          <button class="btn" id="rpGo" type="button">Ver correções</button>
+          <span id="rpMsg" class="save-state"></span>
+        </div>
+      </div>
     </div>
+  </div>
+
+  <!-- ===== MINHAS CORREÇÕES: the student's corrected exams ===== -->
+  <div id="rpView" class="hidden">
+    <div class="card rp-noprint">
+      <div class="rp-bar">
+        <button class="btn rp-ghost" id="rpBack" type="button">← Atividades</button>
+        <span id="rpHello"></span>
+        <span>
+          <button class="btn rp-ghost" id="rpPrint" type="button">Imprimir / salvar PDF</button>
+          <button class="btn rp-ghost" id="rpLogout" type="button">Sair</button>
+        </span>
+      </div>
+    </div>
+    <div id="rpExams"></div>
   </div>
 
   <!-- ===== QUIZ ===== -->
@@ -1710,6 +1780,185 @@
         if ($("name").value.trim() && $("email").value.trim()) start();
       }
     } catch {}
+  })();
+  </script>
+
+  <!-- ===== MINHAS CORREÇÕES (own script: nothing here touches the quiz code) ===== -->
+  <script>
+  (function () {
+    const URL_RELAT = "https://rftveyvbitiysymutdir.supabase.co/functions/v1/relatorios";
+    const KEY = "ilc:correcoes:login";   // stored only when "Lembrar neste aparelho" is ticked
+    const $ = (id) => document.getElementById(id);
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    const fmt = (x) => { const r = Math.round(Number(x) * 100) / 100; return (Number.isInteger(r) ? String(r) : r.toFixed(1)).replace(".", ","); };
+    const titleCase = (s) => String(s || "").toLowerCase().replace(/(^|\s)\S/g, (m) => m.toUpperCase());
+    const store = { get() { try { return JSON.parse(localStorage.getItem(KEY) || "null"); } catch { return null; } },
+                    set(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch {} },
+                    clear() { try { localStorage.removeItem(KEY); } catch {} } };
+
+    async function call(payload) {
+      const ctrl = new AbortController(), t = setTimeout(() => ctrl.abort(), 30000);
+      try {
+        const r = await fetch(URL_RELAT, { method: "POST", headers: { "Content-Type": "application/json" },
+                                           body: JSON.stringify(payload), signal: ctrl.signal });
+        let data = {}; try { data = await r.json(); } catch {}
+        return { ok: r.ok, status: r.status, data };
+      } catch { return { ok: false, status: 0, data: {} }; }
+      finally { clearTimeout(t); }
+    }
+
+    function openForm(open) {
+      $("rpForm").classList.toggle("hidden", !open);
+      $("rpToggle").textContent = "📄 Minhas correções (provas) " + (open ? "▾" : "▸");
+    }
+    $("rpToggle").addEventListener("click", () => openForm($("rpForm").classList.contains("hidden")));
+
+    async function login() {
+      const msg = $("rpMsg");
+      const mat = $("rpMat").value.replace(/\D/g, ""), code = $("rpCode").value.trim();
+      if (!mat || !code) { msg.textContent = "Informe a matrícula e o código."; msg.className = "save-state err"; return; }
+      msg.textContent = "Verificando…"; msg.className = "save-state"; $("rpGo").disabled = true;
+      const { ok, status, data } = await call({ action: "report", matricula: mat, code });
+      $("rpGo").disabled = false;
+      if (!(ok && data.ok)) {
+        msg.textContent = status === 0 ? "Sem conexão — tente de novo." : (data.message || "Não foi possível verificar.");
+        msg.className = "save-state err";
+        if (status === 403) store.clear();
+        return;
+      }
+      if ($("rpRemember").checked) store.set({ mat, code }); else store.clear();
+      msg.textContent = ""; msg.className = "save-state";
+      render(data);
+    }
+
+    function showView(on) {
+      $("login").classList.toggle("hidden", on);
+      $("rpView").classList.toggle("hidden", !on);
+      window.scrollTo(0, 0);
+    }
+
+    function render(data) {
+      $("rpHello").textContent = "Olá, " + titleCase(String(data.nome || "").split(" ")[0]) + "!";
+      const box = $("rpExams"); box.innerHTML = "";
+      if (!data.exams || !data.exams.length) {
+        const c = el("div", "card"); c.appendChild(el("p", "desc", "Nenhuma correção disponível ainda."));
+        box.appendChild(c);
+      } else {
+        for (const ex of data.exams) renderExam(box, ex, data.nome);
+      }
+      showView(true);
+    }
+
+    function renderExam(box, ex, nome) {
+      const s = el("div", "card top");
+      s.appendChild(el("h1", null, ex.title + " — correção individual"));
+      s.appendChild(el("p", "desc", titleCase(nome)));
+      const big = el("div", "rp-big");
+      if (ex.grade === null) big.textContent = "Em correção";
+      else { big.textContent = ex.grade + " "; big.appendChild(el("small", null, "/ 100")); }
+      s.appendChild(big);
+      if (ex.grade !== null) s.appendChild(el("div", "rp-scale",
+        `${fmt(ex.points)} pontos de ${fmt(ex.maxPoints)} no barema. A nota foi normalizada considerando ` +
+        `${fmt(ex.notaBase)} pontos como nota máxima (nota = pontos ÷ ${fmt(ex.notaBase)} × 100, limitada a 100).`));
+      const t = el("table", "rp-sum");
+      for (const q of ex.questions) {
+        const tr = el("tr");
+        tr.appendChild(el("td", null, "Questão " + q.numero));
+        tr.appendChild(el("td", null, q.titulo));
+        const bt = el("td"), bar = el("div", "rp-barq"), fill = el("i");
+        fill.style.width = (q.score === null || !q.max ? 0 : Math.round(100 * q.score / q.max)) + "%";
+        bar.appendChild(fill); bt.appendChild(bar); tr.appendChild(bt);
+        const sc = el("td"); sc.style.textAlign = "right"; sc.style.whiteSpace = "nowrap";
+        sc.appendChild(el("b", null, q.score === null ? "—" : fmt(q.score))); sc.appendChild(document.createTextNode(" / " + fmt(q.max)));
+        tr.appendChild(sc); t.appendChild(tr);
+      }
+      s.appendChild(t);
+      if (ex.grade !== null && ex.grade < 50) {
+        const e = el("div", "rp-enc");
+        e.appendChild(el("b", null, "Ainda há bastante caminho pela frente. "));
+        e.appendChild(document.createTextNode("Esta prova vale 30% da nota final; as duas próximas provas e os exercícios " +
+          "completam os outros 70%. Use as questões abaixo para entender cada ponto que faltou — o gabarito está logo " +
+          "depois de cada resposta — e não hesite em procurar os monitores ou os professores para tirar dúvidas."));
+        s.appendChild(e);
+      }
+      const rev = el("div", "rp-rev"); rev.appendChild(el("h3", null, "Pontos a revisar"));
+      const ul = el("ul");
+      for (const q of ex.questions) {
+        const miss = q.criteria.filter((c) => !c.met);
+        if (!miss.length) continue;
+        const li = el("li"); li.appendChild(el("b", null, `Questão ${q.numero} — ${q.titulo}: `));
+        li.appendChild(document.createTextNode(miss.map((c) => (c.detail || c.label).replace(/\.\s*$/, "")).join("; ") + "."));
+        ul.appendChild(li);
+      }
+      if (ul.children.length) { rev.appendChild(el("div", "rp-hint", "Critérios do barema que não foram atendidos nesta prova:")); rev.appendChild(ul); }
+      else rev.appendChild(el("div", null, "Todos os critérios do barema foram atendidos. Parabéns!"));
+      s.appendChild(rev);
+      box.appendChild(s);
+
+      for (const q of ex.questions) {
+        const c = el("div", "card rp-qcard");
+        const head = el("div", "rp-qhead");
+        const left = el("div"); left.appendChild(el("div", "rp-qtitle", `Questão ${q.numero} · ${q.titulo}`));
+        if (q.grader) left.appendChild(el("div", "rp-grader", "Corrigida por " + q.grader));
+        const sc = el("div", "rp-score", q.score === null ? "—" : fmt(q.score) + " ");
+        sc.appendChild(el("small", null, "/ " + fmt(q.max)));
+        head.appendChild(left); head.appendChild(sc); c.appendChild(head);
+        const ct = el("table", "rp-crit");
+        for (const k of q.criteria) {
+          const tr = el("tr", k.met ? "" : "rp-miss");
+          tr.appendChild(el("td", "rp-mark " + (k.met ? "rp-ok" : "rp-no"), k.met ? "✓" : "✗"));
+          const td = el("td"); td.appendChild(el("div", "rp-lab", k.label)); if (k.detail) td.appendChild(el("div", "rp-det", k.detail));
+          tr.appendChild(td);
+          tr.appendChild(el("td", "rp-pts", `${fmt(k.met ? k.pts : 0)} / ${fmt(k.pts)}`));
+          ct.appendChild(tr);
+        }
+        c.appendChild(ct);
+        if (q.delta) {
+          const a = el("div", "rp-adj");
+          a.appendChild(el("b", null, `Ajuste do corretor: ${q.delta > 0 ? "+" : "−"}${fmt(Math.abs(q.delta))}`));
+          a.appendChild(document.createTextNode(q.delta > 0
+            ? " — crédito por elementos corretos da resposta que o barema não previa."
+            : " — imprecisão na resposta que impede a nota máxima, embora os critérios tenham sido atendidos."));
+          c.appendChild(a);
+        }
+        if (q.scans.length) {
+          const sw = el("div", "rp-scans");
+          for (const u of q.scans) {
+            const a = el("a"); a.href = u; a.target = "_blank"; a.rel = "noopener";
+            const img = el("img"); img.src = u; img.alt = "Resposta digitalizada"; img.loading = "lazy";
+            a.appendChild(img); sw.appendChild(a);
+          }
+          sw.appendChild(el("div", "rp-hint rp-noprint", "Toque na imagem para abrir em tamanho original."));
+          c.appendChild(sw);
+        }
+        if (q.gabaritoHtml) {
+          const g = el("div", "rp-gab"); g.appendChild(el("h3", null, "Gabarito"));
+          const body = el("div");
+          body.innerHTML = window.DOMPurify ? DOMPurify.sanitize(q.gabaritoHtml) : "";
+          g.appendChild(body); c.appendChild(g);
+        }
+        box.appendChild(c);
+      }
+    }
+
+    $("rpGo").addEventListener("click", login);
+    $("rpCode").addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
+    $("rpBack").addEventListener("click", () => showView(false));
+    $("rpPrint").addEventListener("click", () => {
+      document.body.classList.add("rp-printing");
+      window.print();
+      setTimeout(() => document.body.classList.remove("rp-printing"), 500);
+    });
+    $("rpLogout").addEventListener("click", () => {
+      store.clear();
+      $("rpExams").innerHTML = ""; $("rpCode").value = ""; $("rpRemember").checked = false;
+      showView(false);
+    });
+    // remembered login: pre-fill only (the quiz login stays the default screen)
+    const saved = store.get();
+    if (saved && saved.mat && saved.code) {
+      $("rpMat").value = saved.mat; $("rpCode").value = saved.code; $("rpRemember").checked = true;
+    }
   })();
   </script>
 </body>
