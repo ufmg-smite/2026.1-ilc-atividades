@@ -194,11 +194,28 @@
     .rp-gab .lei { color:#6b6b6b; font-size:12.5px; } .rp-gab img { max-width:100%; }
     .rp-gab .tree { text-align:center; } .rp-gab .tree img { width:100%; max-width:680px; }
     @media print {
-      body.rp-printing { background:#fff; padding:0; }
+      @page { size: A4; margin: 10mm 11mm; }
+      body.rp-printing { background:#fff; padding:0; font-size:10pt; }
       body.rp-printing .rp-noprint, body.rp-printing #banner { display:none !important; }
-      body.rp-printing .card { border:0; padding:0; max-width:none; }
+      body.rp-printing .card { border:0; padding:0; margin:0 0 4mm; max-width:none; }
       body.rp-printing .rp-qcard { break-before:page; }
-      body.rp-printing .rp-scans img { max-height:170mm; }
+      /* compact barème, print only: smaller text, tighter rows, description on the label's line */
+      body.rp-printing .rp-qtitle { font-size:12pt; }
+      body.rp-printing .rp-score { font-size:15pt; } body.rp-printing .rp-score small { font-size:10pt; }
+      body.rp-printing .rp-grader { font-size:8.5pt; margin:0; }
+      body.rp-printing table.rp-crit { margin-top:2mm; font-size:8.5pt; }
+      body.rp-printing table.rp-crit td { padding:0.6mm 1mm; }
+      body.rp-printing table.rp-crit td.rp-mark { width:4mm; font-size:9pt; }
+      body.rp-printing table.rp-crit td.rp-pts { width:16mm; }
+      body.rp-printing .rp-lab, body.rp-printing .rp-det { display:inline; }
+      body.rp-printing .rp-det { font-size:8pt; }
+      body.rp-printing .rp-det::before { content:" — "; }
+      body.rp-printing .rp-adj { margin-top:1.5mm; padding:1mm 2.5mm; font-size:8.5pt; }
+      body.rp-printing .rp-scans { margin-top:2.5mm; }
+      body.rp-printing .rp-scans img { max-height:150mm; }
+      body.rp-printing .rp-gab { margin-top:2.5mm; padding:2mm 3mm; font-size:8.8pt; line-height:1.35; }
+      body.rp-printing .rp-gab h3 { font-size:9.5pt; margin:0 0 1mm; } body.rp-printing .rp-gab p { margin:0.8mm 0; }
+      body.rp-printing .rp-gab .tree img { max-width:150mm; }
       body.rp-printing .rp-gab, body.rp-printing .rp-adj, body.rp-printing .rp-enc { break-inside:avoid; }
     }
 </style>
