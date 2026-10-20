@@ -7,7 +7,7 @@
 //
 //    { action:"report", matricula, code }
 //      -> { ok, nome, exams:[ { runId, title, notaBase, points, maxPoints, grade,
-//             questions:[ { numero, titulo, score|null, max, delta, grader,
+//             medianGrade, questions:[ { numero, titulo, score|null, max, median, delta, grader,
 //                           criteria:[{label,detail,pts,met}], scans:[url],
 //                           gabaritoHtml } ] } ] }
 //
@@ -99,6 +99,39 @@ async function signAll(paths: string[]): Promise<Record<string, string>> {
   return out;
 }
 
+// ---------- class context: medians over every graded booklet of the run ----------
+// (aggregate numbers only — no other student's data leaves this function)
+const median = (xs: number[]) => {
+  if (!xs.length) return null;
+  const v = [...xs].sort((a, b) => a - b), m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+};
+const qtype = (qid: string) => qid.replace(/^v\d+_/, "");   // shared across versions
+async function classStats(runId: string, base: number) {
+  const items = await rows(`correction_items?run_id=eq.${encodeURIComponent(runId)}&select=id,question_id,student_key&limit=5000`);
+  const evs: any[] = [];
+  for (let i = 0; i < items.length; i += 150) {   // keep the URL short
+    evs.push(...await rows(`correction_events?item_id=in.${inList(items.slice(i, i + 150).map((x) => x.id))}` +
+      `&kind=in.(accept,override,reopen)&select=item_id,kind,score&order=created_at.asc&limit=5000`));
+  }
+  const dec: Record<string, number> = {};
+  for (const e of evs) { if (e.kind === "reopen") delete dec[e.item_id]; else dec[e.item_id] = Number(e.score); }
+  const byType: Record<string, number[]> = {}, byStudent: Record<string, { pts: number; n: number; graded: number }> = {};
+  for (const it of items) {
+    const st = (byStudent[it.student_key] ||= { pts: 0, n: 0, graded: 0 });
+    st.n++;
+    if (it.id in dec) {
+      st.graded++; st.pts += dec[it.id];
+      (byType[qtype(it.question_id)] ||= []).push(dec[it.id]);
+    }
+  }
+  const grades = Object.values(byStudent).filter((s) => s.graded === s.n && s.n > 0)
+    .map((s) => Math.min(100, Math.round((s.pts / base) * 100)));
+  const byTypeMed: Record<string, number | null> = {};
+  for (const [t, xs] of Object.entries(byType)) byTypeMed[t] = median(xs);
+  return { medianGrade: median(grades), byType: byTypeMed };
+}
+
 // ---------- one exam, for one verified student ----------
 async function buildExam(run: any, studentKey: string) {
   const items = await rows(`correction_items?run_id=eq.${encodeURIComponent(run.run_id)}` +
@@ -132,7 +165,8 @@ async function buildExam(run: any, studentKey: string) {
   for (const q of rq) for (const m of String(q.gabarito_html || "").matchAll(assetRe)) {
     if (m[1].startsWith("relatorios/")) paths.add(m[1]);   // only report assets, never other objects
   }
-  const url = await signAll([...paths]);
+  const base = Number(run.nota_base) || 0;
+  const [url, stats] = await Promise.all([signAll([...paths]), base > 0 ? classStats(run.run_id, base) : null]);
 
   let points = 0, maxPoints = 0, allGraded = true;
   const questions = items.map((it) => {
@@ -154,15 +188,16 @@ async function buildExam(run: any, studentKey: string) {
     return {
       numero: meta.numero ?? 0, titulo: meta.titulo ?? it.question_id,
       score, max, delta: score === null ? 0 : Math.round((score - sumMet) * 100) / 100,
+      median: stats ? (stats.byType[qtype(it.question_id)] ?? null) : null,
       grader: d ? (staffName[String(d.actor_email).toLowerCase()] || "") : "",
       criteria, scans: (it.image_paths || []).map((p: string) => url[p]).filter(Boolean),
       gabaritoHtml: gab,
     };
   }).sort((a, b) => a.numero - b.numero);
 
-  const base = Number(run.nota_base) || 0;
   const grade = allGraded && base > 0 ? Math.min(100, Math.round((points / base) * 100)) : null;
-  return { runId: run.run_id, title: run.title, notaBase: base, points, maxPoints, grade, questions };
+  return { runId: run.run_id, title: run.title, notaBase: base, points, maxPoints, grade,
+           medianGrade: stats ? stats.medianGrade : null, questions };
 }
 
 Deno.serve(async (req) => {

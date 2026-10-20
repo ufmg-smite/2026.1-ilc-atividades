@@ -164,7 +164,9 @@
     .rp-scale { font-size:12.5px; color:#666; margin:4px 0 12px; line-height:1.4; }
     table.rp-sum { width:100%; border-collapse:collapse; font-size:14px; }
     table.rp-sum td { padding:8px 4px; border-bottom:1px solid #eee; }
-    .rp-barq { height:9px; background:#eee; border-radius:5px; min-width:70px; }
+    .rp-barq { position:relative; height:9px; background:#eee; border-radius:5px; min-width:70px; }
+    .rp-barq b { position:absolute; top:-3px; bottom:-3px; width:3px; margin-left:-1px; background:#c07f2a; border-radius:1px; }
+    .rp-legend { font-size:12px; color:#666; margin-top:6px; }
     .rp-barq i { display:block; height:100%; background:#3b6ea5; border-radius:5px; }
     .rp-enc { background:#eef6ef; border-left:4px solid #2e7d4f; padding:10px 14px; margin-top:14px; font-size:14px; line-height:1.45; }
     .rp-rev { border:1px solid #d6dde6; border-radius:6px; padding:10px 14px; margin-top:14px; font-size:14px; }
@@ -182,12 +184,15 @@
     .rp-ok { color:#1e7b3a; } .rp-no { color:#b3261e; }
     .rp-adj { background:#fbf3e6; border-left:4px solid #c07f2a; padding:8px 12px; margin-top:10px; font-size:13.5px; }
     .rp-scans { margin-top:12px; text-align:center; }
-    .rp-scans a { display:block; margin:0 auto 10px; }
-    .rp-scans img { max-width:100%; border:1px solid #ccc; border-radius:4px; }
+    .rp-scanrow { display:flex; gap:8px; justify-content:center; align-items:flex-start; }
+    .rp-scanrow a { flex:1 1 0; min-width:0; max-width:100%; }
+    .rp-scanrow.rp-one a { flex:0 1 auto; }
+    .rp-scans img { display:block; max-width:100%; margin:0 auto; border:1px solid #ccc; border-radius:4px; }
     .rp-hint { font-size:12px; color:#777; }
     .rp-gab { background:#eef3f7; border-left:4px solid #3b6ea5; padding:10px 14px; margin-top:12px; font-size:14px; line-height:1.5; overflow-x:auto; }
     .rp-gab h3 { margin:0 0 4px; font-size:14.5px; color:#2c5580; } .rp-gab p { margin:4px 0; }
     .rp-gab .lei { color:#6b6b6b; font-size:12.5px; } .rp-gab img { max-width:100%; }
+    .rp-gab .tree { text-align:center; } .rp-gab .tree img { width:100%; max-width:680px; }
     @media print {
       body.rp-printing { background:#fff; padding:0; }
       body.rp-printing .rp-noprint, body.rp-printing #banner { display:none !important; }
@@ -1867,12 +1872,19 @@
         tr.appendChild(el("td", null, q.titulo));
         const bt = el("td"), bar = el("div", "rp-barq"), fill = el("i");
         fill.style.width = (q.score === null || !q.max ? 0 : Math.round(100 * q.score / q.max)) + "%";
-        bar.appendChild(fill); bt.appendChild(bar); tr.appendChild(bt);
+        bar.appendChild(fill);
+        if (q.median != null && q.max) {
+          const mk = el("b"); mk.style.left = Math.round(100 * q.median / q.max) + "%";
+          mk.title = "Mediana da turma: " + fmt(q.median); bar.appendChild(mk);
+        }
+        bt.appendChild(bar); tr.appendChild(bt);
         const sc = el("td"); sc.style.textAlign = "right"; sc.style.whiteSpace = "nowrap";
         sc.appendChild(el("b", null, q.score === null ? "—" : fmt(q.score))); sc.appendChild(document.createTextNode(" / " + fmt(q.max)));
         tr.appendChild(sc); t.appendChild(tr);
       }
       s.appendChild(t);
+      if (ex.medianGrade != null) s.appendChild(el("div", "rp-legend",
+        `Barra azul: sua nota na questão · traço laranja: mediana da turma. Mediana da turma na prova: ${fmt(ex.medianGrade)} / 100.`));
       if (ex.grade !== null && ex.grade < 50) {
         const e = el("div", "rp-enc");
         e.appendChild(el("b", null, "Ainda há bastante caminho pela frente. "));
@@ -1923,11 +1935,13 @@
         }
         if (q.scans.length) {
           const sw = el("div", "rp-scans");
+          const row = el("div", "rp-scanrow" + (q.scans.length === 1 ? " rp-one" : ""));   // pages side by side
           for (const u of q.scans) {
             const a = el("a"); a.href = u; a.target = "_blank"; a.rel = "noopener";
             const img = el("img"); img.src = u; img.alt = "Resposta digitalizada"; img.loading = "lazy";
-            a.appendChild(img); sw.appendChild(a);
+            a.appendChild(img); row.appendChild(a);
           }
+          sw.appendChild(row);
           sw.appendChild(el("div", "rp-hint rp-noprint", "Toque na imagem para abrir em tamanho original."));
           c.appendChild(sw);
         }
