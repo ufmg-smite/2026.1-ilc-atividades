@@ -412,8 +412,9 @@
       return;
     }
     if (!it.images.length) {
+      // typed answer (quizzes): show the student's own text in the main panel
       body.innerHTML = it.typedAnswer
-        ? `<div class="noimg">Resposta digitada — sem imagem.</div>`
+        ? `<div class="scanText">${escapeHtml(it.typedAnswer)}</div>`
         : `<div class="noimg">Sem imagem para esta resposta.</div>`;
       return;
     }

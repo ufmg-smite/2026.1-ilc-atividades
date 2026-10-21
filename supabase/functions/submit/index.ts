@@ -399,17 +399,27 @@ Deno.serve(async (req) => {
       const quizId = p.quizId;
       if (!quizId) return json({ error: "quizId obrigatório" }, 400);
 
-      const sres = await db(
+      // The API returns at most 1000 rows per request: read page by page, or a
+      // quiz with many resends silently loses its later answers (2026-10-21 bug).
+      const all = async (path: string): Promise<any[] | null> => {
+        const out: any[] = [];
+        for (let off = 0; ; off += 1000) {
+          const r = await db(`${path}&limit=1000&offset=${off}`);
+          if (!r.ok) return null;
+          const page = await r.json();
+          out.push(...page);
+          if (page.length < 1000) return out;
+        }
+      };
+      const submissions = await all(
         `submissions?quiz_id=eq.${encodeURIComponent(quizId)}` +
-        `&select=student_name,student_email,question_id,answer,image_ids,created_at&order=created_at`,
+        `&select=student_name,student_email,question_id,answer,image_ids,created_at&order=created_at,id`,
       );
-      if (!sres.ok) return json({ error: "Falha ao ler respostas" }, 500);
-      const submissions = await sres.json();
+      if (!submissions) return json({ error: "Falha ao ler respostas" }, 500);
 
-      const ires = await db(
-        `answer_images?quiz_id=eq.${encodeURIComponent(quizId)}&select=id,path`,
-      );
-      const imgRows = ires.ok ? await ires.json() : [];
+      const imgRows = (await all(
+        `answer_images?quiz_id=eq.${encodeURIComponent(quizId)}&select=id,path&order=id`,
+      )) || [];
       let images: any[] = [];
       if (imgRows.length) {
         // one batch call to sign every photo URL (valid 15 min); the browser

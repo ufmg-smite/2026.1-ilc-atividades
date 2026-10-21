@@ -126,9 +126,16 @@ def main():
     q = urllib.parse.urlencode({
         "quiz_id": f"eq.{quiz_id}",
         "select": "student_name,student_email,question_id,answer,image_ids,created_at",
-        "order": "created_at",
+        "order": "created_at,id",  # stable order across pages
     })
-    subs = json.loads(api_get(base, key, f"/rest/v1/submissions?{q}"))
+    # the API returns at most 1000 rows per request: read page by page
+    subs, off = [], 0
+    while True:
+        page = json.loads(api_get(base, key, f"/rest/v1/submissions?{q}&limit=1000&offset={off}"))
+        subs += page
+        if len(page) < 1000:
+            break
+        off += 1000
     if not subs:
         print(f"No submissions for quiz_id='{quiz_id}'.")
         return
@@ -144,7 +151,13 @@ def main():
 
     # 2. map image id -> storage path
     iq = urllib.parse.urlencode({"quiz_id": f"eq.{quiz_id}", "select": "id,path"})
-    imgs = json.loads(api_get(base, key, f"/rest/v1/answer_images?{iq}"))
+    imgs, off = [], 0
+    while True:
+        page = json.loads(api_get(base, key, f"/rest/v1/answer_images?{iq}&limit=1000&offset={off}"))
+        imgs += page
+        if len(page) < 1000:
+            break
+        off += 1000
     id2path = {row["id"]: row["path"] for row in imgs}
 
     os.makedirs(outdir, exist_ok=True)
