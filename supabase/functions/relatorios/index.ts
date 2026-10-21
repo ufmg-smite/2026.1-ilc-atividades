@@ -7,7 +7,7 @@
 //
 //    { action:"report", matricula, code }
 //      -> { ok, nome, exams:[ { runId, title, notaBase, points, maxPoints, grade,
-//             medianGrade, questions:[ { numero, titulo, score|null, max, median, delta, grader,
+//             medianGrade, questions:[ { numero, titulo, score|null, max, median, delta, grader, typed,
 //                           criteria:[{label,detail,pts,met}], scans:[url],
 //                           gabaritoHtml } ] } ] }
 //
@@ -137,7 +137,7 @@ async function classStats(runId: string, base: number) {
 // ---------- one exam, for one verified student ----------
 async function buildExam(run: any, studentKey: string) {
   const items = await rows(`correction_items?run_id=eq.${encodeURIComponent(run.run_id)}` +
-    `&student_key=eq.${encodeURIComponent(studentKey)}&select=id,question_id,image_paths`);
+    `&student_key=eq.${encodeURIComponent(studentKey)}&select=id,question_id,image_paths,typed_answer`);
   if (!items.length) return null;
   const qids = items.map((i) => i.question_id);
   const [evs, crit, rq, staff] = await Promise.all([
@@ -193,6 +193,7 @@ async function buildExam(run: any, studentKey: string) {
       median: stats ? (stats.byType[qtype(it.question_id)] ?? null) : null,
       grader: d ? (staffName[String(d.actor_email).toLowerCase()] || "") : "",
       criteria, scans: (it.image_paths || []).map((p: string) => url[p]).filter(Boolean),
+      typed: it.typed_answer || "",            // quizzes: the typed part of the answer
       gabaritoHtml: gab,
     };
   }).sort((a, b) => a.numero - b.numero);

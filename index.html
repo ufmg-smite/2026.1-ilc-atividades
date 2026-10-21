@@ -189,6 +189,8 @@
     .rp-scanrow.rp-one a { flex:0 1 auto; }
     .rp-scans img { display:block; max-width:100%; margin:0 auto; border:1px solid #ccc; border-radius:4px; }
     .rp-hint { font-size:12px; color:#777; }
+    .rp-typed { margin-top:12px; padding:10px 14px; border:1px solid #e3e3e3; border-radius:6px; font-size:14.5px; line-height:1.55; overflow-x:auto; }
+    .rp-typed p { margin:4px 0; } .rp-typed table { border-collapse:collapse; } .rp-typed td, .rp-typed th { border:1px solid #ddd; padding:2px 10px; text-align:center; }
     .rp-gab { background:#eef3f7; border-left:4px solid #3b6ea5; padding:10px 14px; margin-top:12px; font-size:14px; line-height:1.5; overflow-x:auto; }
     .rp-gab h3 { margin:0 0 4px; font-size:14.5px; color:#2c5580; } .rp-gab p { margin:4px 0; }
     .rp-gab .lei { color:#6b6b6b; font-size:12.5px; } .rp-gab img { max-width:100%; }
@@ -1817,6 +1819,17 @@
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
     const fmt = (x) => { const r = Math.round(Number(x) * 100) / 100; return (Number.isInteger(r) ? String(r) : r.toFixed(1)).replace(".", ","); };
     const titleCase = (s) => String(s || "").toLowerCase().replace(/(^|\s)\S/g, (m) => m.toUpperCase());
+    // typed answers: $…$ through KaTeX, the rest through marked, then sanitized
+    function rich(md) {
+      const math = [];
+      const pt = String(md || "").replace(/\$\$([\s\S]+?)\$\$|\$([^$]+)\$/g, (m, d, i) => {
+        let h; try { h = katex.renderToString(d || i, { throwOnError: false, displayMode: !!d }); } catch { h = m; }
+        return "@@M" + (math.push(h) - 1) + "@@";
+      });
+      let html; try { html = marked.parse(pt, { breaks: true }); } catch { html = pt.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+      html = window.DOMPurify ? DOMPurify.sanitize(html) : "";
+      return html.replace(/@@M(\d+)@@/g, (_, k) => math[+k]);
+    }
     const store = { get() { try { return JSON.parse(localStorage.getItem(KEY) || "null"); } catch { return null; } },
                     set(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch {} },
                     clear() { try { localStorage.removeItem(KEY); } catch {} } };
@@ -1950,6 +1963,12 @@
             ? " — crédito por elementos corretos da resposta que o barema não previa."
             : " — desconto por imprecisões na resposta que os critérios do barema não cobrem."));
           c.appendChild(a);
+        }
+        if (q.typed) {                                   // quizzes: typed part of the answer
+          const t = el("div", "rp-typed");
+          t.appendChild(el("div", "rp-hint", q.scans.length ? "Parte digitada da resposta" : "Sua resposta"));
+          const b = el("div"); b.innerHTML = rich(q.typed); t.appendChild(b);
+          c.appendChild(t);
         }
         if (q.scans.length) {
           const sw = el("div", "rp-scans");

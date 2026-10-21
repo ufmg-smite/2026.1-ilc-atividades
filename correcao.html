@@ -63,6 +63,8 @@
                 white-space:pre-wrap; word-break:break-word; user-select:text;
                 font:15.5px/1.7 system-ui, -apple-system, Roboto, Arial, sans-serif; }
     #scans .noimg { color:#bdc1c6; margin:auto; font-size:13px; text-align:center; padding:20px; }
+    .scanText.typedPart { height:auto; overflow:visible; flex:none; }
+    .partTag { font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:#80868b; margin-bottom:6px; }
     /* typed answers / transcriptions rendered: Markdown + KaTeX, readable type */
     .scanText.rich { white-space:normal; font:16.5px/1.65 "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
                      padding:22px 28px; }
@@ -435,7 +437,10 @@
         : `<div class="noimg">Sem imagem para esta resposta.</div>`;
       return;
     }
-    body.innerHTML = `<div class="scanWrap">` + it.images.map((u) =>
+    // answer typed AND photographed (quizzes): the typed part first, then the photos
+    const typed = it.typedAnswer
+      ? `<div class="scanText rich typedPart"><div class="partTag">Parte digitada</div>${renderRich(it.typedAnswer)}</div>` : "";
+    body.innerHTML = `<div class="scanWrap">` + typed + it.images.map((u) =>
       `<img src="${escapeHtml(u)}" draggable="false"
             onerror="window.__imgFail && window.__imgFail()">`).join("") + `</div>`;
     scheduleFit();
@@ -774,9 +779,10 @@
   function fitToView() {                          // whole first page visible, centred
     const w = $("scanBody").querySelector(".scanWrap");
     const first = w && w.querySelector("img");
+    const typed = w && w.querySelector(".typedPart");   // typed part shown above the photos
+    const h = (first ? first.clientHeight : 0) + (typed ? typed.offsetHeight + 16 : 0);
     panX = 0; panY = 0;
-    scale = (first && first.clientHeight)
-      ? (Math.min(1, $("scanBody").clientHeight / first.clientHeight) || 1) : 1;
+    scale = h ? (Math.min(1, $("scanBody").clientHeight / h) || 1) : 1;
     applyTransform();
   }
   function scheduleFit() {                         // fit once the first image knows its size
