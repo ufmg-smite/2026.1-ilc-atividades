@@ -63,6 +63,18 @@
                 white-space:pre-wrap; word-break:break-word; user-select:text;
                 font:15.5px/1.7 system-ui, -apple-system, Roboto, Arial, sans-serif; }
     #scans .noimg { color:#bdc1c6; margin:auto; font-size:13px; text-align:center; padding:20px; }
+    /* typed answers / transcriptions rendered: Markdown + KaTeX, readable type */
+    .scanText.rich { white-space:normal; font:16.5px/1.65 "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+                     padding:22px 28px; }
+    .scanText.rich p { margin:0 0 .65em; }
+    .scanText.rich h1, .scanText.rich h2, .scanText.rich h3 { font-size:1.05em; margin:.8em 0 .4em; }
+    .scanText.rich ul, .scanText.rich ol { margin:.3em 0 .6em 1.3em; padding:0; }
+    .scanText.rich table { border-collapse:collapse; margin:.4em 0 .8em; }
+    .scanText.rich th, .scanText.rich td { border:1px solid #dadce0; padding:3px 12px; text-align:center; }
+    .scanText.rich th { background:#f1f3f4; }
+    .scanText.rich code { background:#f1f3f4; padding:1px 5px; border-radius:4px; font-size:.92em; }
+    .scanText.rich .katex { font-size:1.08em; }
+    .scanText.rich .katex-display { margin:.35em 0; overflow-x:auto; overflow-y:hidden; }
     .imgtools { position:absolute; top:12px; right:12px; display:flex; gap:6px; z-index:5; }
     .imgtools button { padding:4px 9px; font-size:12px; background:#5f6368cc; }
 
@@ -278,7 +290,11 @@
   // Same renderer as admin.html: $...$ through KaTeX, the rest through marked.
   function renderRich(md) {
     const math = [];
-    const pt = String(md || "").replace(/\$([^$]+)\$/g, (m, tex) => {
+    const pt = String(md || "").replace(/\$\$([\s\S]+?)\$\$/g, (m, tex) => {   // display math first
+      let h; try { h = katex.renderToString(tex, { throwOnError: false, displayMode: true }); }
+      catch { h = escapeHtml(m); }
+      return "@@MATH" + (math.push(h) - 1) + "@@";
+    }).replace(/\$([^$]+)\$/g, (m, tex) => {
       let h; try { h = katex.renderToString(tex, { throwOnError: false }); }
       catch { h = escapeHtml(m); }
       return "@@MATH" + (math.push(h) - 1) + "@@";
@@ -408,13 +424,14 @@
     if (!it) { body.innerHTML = ""; return; }
     if (SCAN_MODE === "text") {
       const txt = ($("transc").value || it.transcription || it.typedAnswer || "").trim();
-      body.innerHTML = `<div class="scanText">${txt ? escapeHtml(txt) : "(sem transcrição para esta resposta)"}</div>`;
+      body.innerHTML = txt ? `<div class="scanText rich">${renderRich(txt)}</div>`
+                           : `<div class="scanText">(sem transcrição para esta resposta)</div>`;
       return;
     }
     if (!it.images.length) {
       // typed answer (quizzes): show the student's own text in the main panel
       body.innerHTML = it.typedAnswer
-        ? `<div class="scanText">${escapeHtml(it.typedAnswer)}</div>`
+        ? `<div class="scanText rich">${renderRich(it.typedAnswer)}</div>`
         : `<div class="noimg">Sem imagem para esta resposta.</div>`;
       return;
     }
