@@ -189,6 +189,12 @@
     .rp-scanrow.rp-one a { flex:0 1 auto; }
     .rp-scans img { display:block; max-width:100%; margin:0 auto; border:1px solid #ccc; border-radius:4px; }
     .rp-hint { font-size:12px; color:#777; }
+    .rp-tabs { display:flex; flex-wrap:wrap; gap:8px; }
+    .rp-tab { background:#fff; color:var(--accent); border:1px solid var(--accent); border-radius:16px; padding:6px 14px; font:inherit; font-size:14px; cursor:pointer; }
+    .rp-tab-on { background:var(--accent); color:#fff; }
+    .rp-enun { background:#f5f4f1; border-left:4px solid #b9b4a7; padding:8px 12px; margin-top:10px; font-size:14px; line-height:1.5; overflow-x:auto; }
+    .rp-enun h1, .rp-enun h2, .rp-enun h3 { font-size:14.5px; margin:2px 0 6px; } .rp-enun p { margin:4px 0; }
+    .rp-missing { margin-top:10px; padding:8px 12px; background:#fdecea; color:#a52714; border-radius:6px; font-size:14px; }
     .rp-typed { margin-top:12px; padding:10px 14px; border:1px solid #e3e3e3; border-radius:6px; font-size:14.5px; line-height:1.55; overflow-x:auto; }
     .rp-typed p { margin:4px 0; } .rp-typed table { border-collapse:collapse; } .rp-typed td, .rp-typed th { border:1px solid #ddd; padding:2px 10px; text-align:center; }
     .rp-gab { background:#eef3f7; border-left:4px solid #3b6ea5; padding:10px 14px; margin-top:12px; font-size:14px; line-height:1.5; overflow-x:auto; }
@@ -249,7 +255,7 @@
     </div>
     <!-- ===== MINHAS CORREÇÕES: entry (independent of the quiz; own script below) ===== -->
     <div class="card" id="rpEntry">
-      <button type="button" class="rp-toggle" id="rpToggle">📄 Minhas correções (provas) ▸</button>
+      <button type="button" class="rp-toggle" id="rpToggle">📄 Minhas correções (provas e atividades) ▸</button>
       <div id="rpForm" class="hidden">
         <p class="desc">Use a sua matrícula e o código de acesso pessoal que você recebeu por e-mail.</p>
         <label class="fld" for="rpMat">Matrícula</label>
@@ -1847,7 +1853,7 @@
 
     function openForm(open) {
       $("rpForm").classList.toggle("hidden", !open);
-      $("rpToggle").textContent = "📄 Minhas correções (provas) " + (open ? "▾" : "▸");
+      $("rpToggle").textContent = "📄 Minhas correções (provas e atividades) " + (open ? "▾" : "▸");
     }
     $("rpToggle").addEventListener("click", () => openForm($("rpForm").classList.contains("hidden")));
 
@@ -1881,13 +1887,27 @@
       if (!data.exams || !data.exams.length) {
         const c = el("div", "card"); c.appendChild(el("p", "desc", "Nenhuma correção disponível ainda."));
         box.appendChild(c);
-      } else {
-        for (const ex of data.exams) renderExam(box, ex, data.nome);
+      } else if (data.exams.length === 1) {
+        renderExam(box, data.exams[0], data.nome);
+      } else {                                    // several documents: one tab each, latest first shown
+        const tabs = el("div", "card rp-noprint rp-tabs"), pane = el("div");
+        const show = (i) => {
+          pane.innerHTML = "";
+          renderExam(pane, data.exams[i], data.nome);
+          [...tabs.children].forEach((b, k) => b.classList.toggle("rp-tab-on", k === i));
+        };
+        data.exams.forEach((ex, i) => {
+          const b = el("button", "rp-tab", ex.title + (ex.grade != null ? " · " + ex.grade : ""));
+          b.type = "button"; b.addEventListener("click", () => show(i)); tabs.appendChild(b);
+        });
+        box.appendChild(tabs); box.appendChild(pane);
+        show(data.exams.length - 1);
       }
       showView(true);
     }
 
     function renderExam(box, ex, nome) {
+      const quiz = ex.kind === "atividade";
       const s = el("div", "card top");
       s.appendChild(el("h1", null, ex.title + " — correção individual"));
       s.appendChild(el("p", "desc", titleCase(nome)));
@@ -1895,9 +1915,10 @@
       if (ex.grade === null) big.textContent = "Em correção";
       else { big.textContent = ex.grade + " "; big.appendChild(el("small", null, "/ 100")); }
       s.appendChild(big);
-      if (ex.grade !== null) s.appendChild(el("div", "rp-scale",
-        `${fmt(ex.points)} pontos de ${fmt(ex.maxPoints)} no barema. A nota foi normalizada considerando ` +
-        `${fmt(ex.notaBase)} pontos como nota máxima (nota = pontos ÷ ${fmt(ex.notaBase)} × 100, limitada a 100).`));
+      if (ex.grade !== null) s.appendChild(el("div", "rp-scale", quiz
+        ? `${fmt(ex.points)} pontos de ${fmt(ex.maxPoints)}.`
+        : `${fmt(ex.points)} pontos de ${fmt(ex.maxPoints)} no barema. A nota foi normalizada considerando ` +
+          `${fmt(ex.notaBase)} pontos como nota máxima (nota = pontos ÷ ${fmt(ex.notaBase)} × 100, limitada a 100).`));
       const t = el("table", "rp-sum");
       for (const q of ex.questions) {
         const tr = el("tr");
@@ -1917,8 +1938,8 @@
       }
       s.appendChild(t);
       if (ex.medianGrade != null) s.appendChild(el("div", "rp-legend",
-        `Barra azul: sua nota na questão · traço laranja: mediana da turma. Mediana da turma na prova: ${fmt(ex.medianGrade)} / 100.`));
-      if (ex.grade !== null && ex.grade < 50) {
+        `Barra azul: sua nota na questão · traço laranja: mediana da turma. Mediana da turma ${quiz ? "na atividade" : "na prova"}: ${fmt(ex.medianGrade)} / 100.`));
+      if (!quiz && ex.grade !== null && ex.grade < 50) {
         const e = el("div", "rp-enc", "A Prova 1 é só uma parte da nota: ela vale 30%, e ainda temos mais duas provas " +
           "e os exercícios. Revise com calma as questões abaixo, comparando sua resposta com o gabarito, e procure os " +
           "monitores ou os professores se tiver dúvidas.");
@@ -1930,10 +1951,11 @@
         const miss = q.criteria.filter((c) => !c.met);
         if (!miss.length) continue;
         const li = el("li"); li.appendChild(el("b", null, `Questão ${q.numero} — ${q.titulo}: `));
-        li.appendChild(document.createTextNode(miss.map((c) => (c.detail || c.label).replace(/\.\s*$/, "")).join("; ") + "."));
+        li.appendChild(document.createTextNode(q.missing ? "não respondida."
+          : miss.map((c) => (c.detail || c.label).replace(/\.\s*$/, "")).join("; ") + "."));
         ul.appendChild(li);
       }
-      if (ul.children.length) { rev.appendChild(el("div", "rp-hint", "Critérios do barema que não foram atendidos nesta prova:")); rev.appendChild(ul); }
+      if (ul.children.length) { rev.appendChild(el("div", "rp-hint", `Critérios do barema que não foram atendidos nesta ${quiz ? "atividade" : "prova"}:`)); rev.appendChild(ul); }
       else rev.appendChild(el("div", null, "Todos os critérios do barema foram atendidos. Parabéns!"));
       s.appendChild(rev);
       box.appendChild(s);
@@ -1946,6 +1968,10 @@
         const sc = el("div", "rp-score", q.score === null ? "—" : fmt(q.score) + " ");
         sc.appendChild(el("small", null, "/ " + fmt(q.max)));
         head.appendChild(left); head.appendChild(sc); c.appendChild(head);
+        if (q.enunciado) {                                // activities: the statement
+          const en = el("div", "rp-enun"); en.innerHTML = rich(q.enunciado); c.appendChild(en);
+        }
+        if (q.missing) c.appendChild(el("div", "rp-missing", "Você não enviou resposta para esta questão."));
         const ct = el("table", "rp-crit");
         for (const k of q.criteria) {
           const tr = el("tr", k.met ? "" : "rp-miss");

@@ -7,7 +7,8 @@
 //
 //    { action:"report", matricula, code }
 //      -> { ok, nome, exams:[ { runId, title, notaBase, points, maxPoints, grade,
-//             medianGrade, questions:[ { numero, titulo, score|null, max, median, delta, grader, typed,
+//             kind, medianGrade, questions:[ { numero, titulo, score|null, max, missing, median, delta,
+//                           grader, typed, enunciado,
 //                           criteria:[{label,detail,pts,met}], scans:[url],
 //                           gabaritoHtml } ] } ] }
 //
@@ -134,21 +135,29 @@ async function classStats(runId: string, base: number) {
   return { medianGrade: median(grades), byType: byTypeMed };
 }
 
-// ---------- one exam, for one verified student ----------
+// ---------- one exam or activity, for one verified student ----------
+// Exams: the student's own booklet questions (their version). Activities (quizzes,
+// correction_runs.source = quiz id): ALL questions of the quiz, with the statement,
+// and the ones the student did not answer shown as 0 / "não respondida".
+const headingTitle = (prompt: string) => {
+  const m = String(prompt || "").match(/^\s*#+\s*(?:\d+\s*[.)]\s*)?(.+?)\s*$/m);
+  return m ? m[1].replace(/[*_`$]/g, "").trim() : "";
+};
 async function buildExam(run: any, studentKey: string) {
-  const items = await rows(`correction_items?run_id=eq.${encodeURIComponent(run.run_id)}` +
+  const rid = encodeURIComponent(run.run_id);
+  const items = await rows(`correction_items?run_id=eq.${rid}` +
     `&student_key=eq.${encodeURIComponent(studentKey)}&select=id,question_id,image_paths,typed_answer`);
   if (!items.length) return null;
-  const qids = items.map((i) => i.question_id);
-  const [evs, crit, rq, staff] = await Promise.all([
+  const [evs, crit, rq, cq, cr, staff] = await Promise.all([
     rows(`correction_events?item_id=in.${inList(items.map((i) => i.id))}&kind=in.(accept,override,reopen)` +
       `&select=item_id,kind,score,criteria,rubric,actor_email,created_at&order=created_at.asc`),
-    rows(`correction_criteria?run_id=eq.${encodeURIComponent(run.run_id)}&question_id=in.${inList(qids)}` +
-      `&active=eq.true&select=question_id,key,label,detail,points,position`),
-    rows(`report_questions?run_id=eq.${encodeURIComponent(run.run_id)}&question_id=in.${inList(qids)}` +
-      `&select=question_id,numero,titulo,gabarito_html`),
+    rows(`correction_criteria?run_id=eq.${rid}&active=eq.true&select=question_id,key,label,detail,points,position`),
+    rows(`report_questions?run_id=eq.${rid}&select=question_id,numero,titulo,gabarito_html`),
+    rows(`correction_questions?run_id=eq.${rid}&select=question_id,prompt,position&order=position.asc`),
+    rows(`correction_runs?id=eq.${rid}&select=source`),
     rows(`staff?select=email,name`),
   ]);
+  const isQuiz = !!(cr[0] && cr[0].source);
   // current decision per item: latest accept/override not followed by a reopen
   const dec: Record<string, any> = {};
   for (const e of evs) {
@@ -159,6 +168,12 @@ async function buildExam(run: any, studentKey: string) {
   for (const s of staff) staffName[String(s.email).toLowerCase()] = s.name || "";
   const qmeta: Record<string, any> = {};
   for (const q of rq) qmeta[q.question_id] = q;
+  const cqmeta: Record<string, any> = {};
+  for (const q of cq) cqmeta[q.question_id] = q;
+  const itemOf: Record<string, any> = {};
+  for (const it of items) itemOf[it.question_id] = it;
+  // which questions to show: exam = the booklet's; activity = every question of the quiz
+  const qids: string[] = isQuiz ? cq.map((q) => q.question_id) : items.map((i) => i.question_id);
 
   // sign scans + gabarito assets in one call
   const assetRe = /\{\{asset:([A-Za-z0-9_\-./]+)\}\}/g;
@@ -171,12 +186,14 @@ async function buildExam(run: any, studentKey: string) {
   const [url, stats] = await Promise.all([signAll([...paths]), base > 0 ? classStats(run.run_id, base) : null]);
 
   let points = 0, maxPoints = 0, allGraded = true;
-  const questions = items.map((it) => {
-    const d = dec[it.id];
-    const meta = qmeta[it.question_id] || {};
+  const questions = qids.map((qid) => {
+    const it = itemOf[qid];
+    const d = it ? dec[it.id] : null;
+    const meta = qmeta[qid] || {};
+    const cqm = cqmeta[qid] || {};
     // The CURRENT barème (labels, points, max) with the grader's ticks. A grade
     // given under an earlier barème keeps its frozen score; its ticks map by key.
-    const qcrit = crit.filter((c) => c.question_id === it.question_id)
+    const qcrit = crit.filter((c) => c.question_id === qid)
       .sort((a, b) => (a.position ?? 99) - (b.position ?? 99));
     const criteria = qcrit.map((c) => ({
       label: c.label ?? c.key, detail: c.detail ?? "",
@@ -184,23 +201,26 @@ async function buildExam(run: any, studentKey: string) {
     }));
     const max = criteria.reduce((s, c) => s + c.pts, 0);
     const sumMet = criteria.reduce((s, c) => s + (c.met ? c.pts : 0), 0);
-    const score = d ? Number(d.score) : null;
+    const missing = !it;                                   // activity question not answered
+    const score = missing ? 0 : (d ? Number(d.score) : null);
     if (score === null) allGraded = false; else { points += score; maxPoints += max; }
     const gab = String(meta.gabarito_html || "").replace(assetRe, (_m, p) => url[p] || "");
     return {
-      numero: meta.numero ?? 0, titulo: meta.titulo ?? it.question_id,
-      score, max, delta: score === null ? 0 : Math.round((score - sumMet) * 100) / 100,
-      median: stats ? (stats.byType[qtype(it.question_id)] ?? null) : null,
+      numero: meta.numero ?? ((cqm.position ?? 0) + 1),
+      titulo: meta.titulo ?? (headingTitle(cqm.prompt) || qid),
+      score, max, missing, delta: (score === null || missing) ? 0 : Math.round((score - sumMet) * 100) / 100,
+      median: stats ? (stats.byType[qtype(qid)] ?? null) : null,
       grader: d ? (staffName[String(d.actor_email).toLowerCase()] || "") : "",
-      criteria, scans: (it.image_paths || []).map((p: string) => url[p]).filter(Boolean),
-      typed: it.typed_answer || "",            // quizzes: the typed part of the answer
+      criteria, scans: ((it && it.image_paths) || []).map((p: string) => url[p]).filter(Boolean),
+      typed: (it && it.typed_answer) || "",                // quizzes: the typed part of the answer
+      enunciado: isQuiz ? (cqm.prompt || "") : "",          // quizzes: the statement (no scan carries it)
       gabaritoHtml: gab,
     };
   }).sort((a, b) => a.numero - b.numero);
 
   const grade = allGraded && base > 0 ? Math.min(100, Math.round((points / base) * 100)) : null;
-  return { runId: run.run_id, title: run.title, notaBase: base, points, maxPoints, grade,
-           medianGrade: stats ? stats.medianGrade : null, questions };
+  return { runId: run.run_id, title: run.title, kind: isQuiz ? "atividade" : "prova", notaBase: base,
+           points, maxPoints, grade, medianGrade: stats ? stats.medianGrade : null, questions };
 }
 
 Deno.serve(async (req) => {
