@@ -130,6 +130,43 @@
     kbd { background:#f1f3f4; border:1px solid #dadce0; border-bottom-width:2px; border-radius:4px;
           padding:1px 5px; font-family:ui-monospace, Menlo, monospace; font-size:11.5px; }
     .keys { display:grid; grid-template-columns:auto 1fr; gap:6px 12px; align-items:baseline; font-size:13px; }
+
+    /* ---------- action buttons: what the keys do, for touch screens ---------- */
+    #actbar { display:flex; gap:6px; margin-top:8px; }
+    #actbar button { padding:7px 10px; }
+    #actbar .main { flex:1; }
+    .scanWrap { touch-action:none; }            /* our own pan/pinch, not the page's */
+    .mobOnly { display:none; }
+
+    /* ---------- phone: scans on top, panel below, buttons pinned to the bottom ---------- */
+    @media (max-width: 800px) {
+      .mobOnly { display:inline-block; }
+      .deskOnly, header h1, .sect > label .hint { display:none; }
+      header { padding:6px 8px; }
+      #loggedIn { gap:6px !important; }
+      header select { max-width:44vw; font-size:13px; padding:5px 6px; }
+      header button { padding:6px 10px; }
+      main { flex-direction:column; position:relative; }
+      #sidebar { display:none; position:absolute; top:0; bottom:0; left:0; width:85vw; max-width:340px;
+                 z-index:20; box-shadow:2px 0 12px #0004; }
+      #sidebar.open { display:block; }
+      .srow { padding:11px 12px; font-size:14px; }
+      #scans { flex:0 0 52%; padding:6px; }
+      .imgtools { top:8px; right:8px; }
+      .imgtools button { padding:7px 11px; font-size:15px; }
+      #panel { min-width:0; border-left:0; border-top:1px solid #dadce0; padding:10px 12px 90px;
+               display:flex; flex-direction:column; }
+      #sectCrit { order:1; } #sectJustif { order:2; } #sectTransc { order:3; }   /* criteria first */
+      #justif { height:6em; }
+      #actbar { position:fixed; left:0; right:0; bottom:0; margin:0; z-index:30; background:#fff;
+                border-top:1px solid #dadce0; box-shadow:0 -2px 8px #0002;
+                padding:8px 8px calc(8px + env(safe-area-inset-bottom)); }
+      #actbar button { min-height:48px; font-size:16px; padding:0 12px; }
+      table.crit td { font-size:14px; padding:9px 4px; }
+      table.crit input[type=checkbox] { width:22px; height:22px; vertical-align:-5px; }
+      textarea { font-size:16px; }               /* below 16px iOS zooms the page on focus */
+      .modal { padding:14px; }
+    }
   </style>
 </head>
 <body>
@@ -140,19 +177,20 @@
     <button onclick="signInGoogle()">Entrar com Google</button>
   </div>
   <div id="loggedIn" class="hidden" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <button class="ghost mobOnly" onclick="toggleList()">☰ Lista</button>
     <select id="runSel" onchange="onRunChange()"></select>
     <select id="qSel" onchange="loadQueue()"></select>
-    <select id="orderSel" onchange="loadQueue()" title="Ordem da fila">
+    <select id="orderSel" class="deskOnly" onchange="loadQueue()" title="Ordem da fila">
       <option value="alpha" selected>ordem alfabética</option>
       <option value="default">agrupado por resposta</option>
     </select>
     <span class="prog" id="prog"></span>
     <span class="spacer"></span>
     <button class="ghost" onclick="openRubric()" title="b">Barema</button>
-    <button class="ghost" onclick="exportCsv()">CSV</button>
-    <button class="ghost" onclick="openHelp()" title="?">Teclas</button>
-    <span class="who" id="who"></span>
-    <button class="grey" onclick="signOut()">Sair</button>
+    <button class="ghost deskOnly" onclick="exportCsv()">CSV</button>
+    <button class="ghost deskOnly" onclick="openHelp()" title="?">Teclas</button>
+    <span class="who deskOnly" id="who"></span>
+    <button class="grey deskOnly" onclick="signOut()">Sair</button>
   </div>
 </header>
 
@@ -188,19 +226,26 @@
                 style="padding:3px 8px;font-size:12px">✕ nota</button>
       </div>
       <div id="msg"></div>
+      <div id="actbar">
+        <button class="ghost" onclick="act('prev')" title="anterior (←)">◀</button>
+        <button class="ghost" onclick="act('minus')" title="−0,5 (↓)">−½</button>
+        <button class="ghost" onclick="act('plus')" title="+0,5 (↑)">+½</button>
+        <button class="green main" onclick="act('ok')" title="confirma e avança (Enter)">✓ Confirmar</button>
+        <button class="ghost" onclick="act('next')" title="próxima (→)">▶</button>
+      </div>
     </div>
 
-    <div class="sect">
+    <div class="sect" id="sectJustif">
       <label>Justificativa <span class="hint">(e edita · Enter confirma · Shift+Enter quebra linha)</span></label>
       <textarea id="justif" rows="7"></textarea>
     </div>
 
-    <div class="sect">
+    <div class="sect" id="sectCrit">
       <label>Critérios <span class="hint">(1–9 alterna)</span></label>
       <table class="crit" id="critTable"></table>
     </div>
 
-    <div class="sect">
+    <div class="sect" id="sectTransc">
       <label>Transcrição <span class="hint">(t edita · Enter salva e re-avalia · g re-avalia)</span></label>
       <textarea id="transc" rows="6"></textarea>
     </div>
@@ -839,6 +884,55 @@
       zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.001));
     }, { passive: false });
   })();
+  // Touch: one finger pans, two fingers pinch-zoom, a double tap fits the page again.
+  (function initTouch() {
+    const scans = $("scans");
+    let pts = null, moved = false, lastTap = 0;
+    const one = (t) => [t[0].clientX, t[0].clientY];
+    const mid = (t) => [(t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2];
+    const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    scans.addEventListener("touchstart", (e) => {
+      if (e.target.closest(".imgtools") || !e.target.closest(".scanWrap")) { pts = null; return; }
+      const t = e.touches;
+      pts = t.length >= 2 ? { m: mid(t), d: dist(t) } : { m: one(t) };
+      moved = t.length >= 2;
+    }, { passive: true });
+    scans.addEventListener("touchmove", (e) => {
+      if (!pts) return;
+      e.preventDefault(); moved = true;
+      const t = e.touches;
+      if (t.length >= 2 && pts.d) {
+        const m = mid(t), d = dist(t);
+        panX += m[0] - pts.m[0]; panY += m[1] - pts.m[1];
+        zoomAt(m[0], m[1], d / pts.d); applyTransform();
+        pts = { m, d };
+      } else if (t.length === 1) {
+        const m = one(t);
+        pan(m[0] - pts.m[0], m[1] - pts.m[1]); pts = { m };
+      }
+    }, { passive: false });
+    scans.addEventListener("touchend", (e) => {
+      if (!pts) return;
+      if (e.touches.length) { pts = { m: one(e.touches) }; return; }   // pinch -> keep panning
+      if (!moved) {
+        const now = Date.now();
+        if (now - lastTap < 300) { fitToView(); lastTap = 0; } else lastTap = now;
+      }
+      pts = null;
+    });
+  })();
+
+  // ---------- buttons: the keyboard's actions for touch screens (no Enter / arrows) ----------
+  window.act = async function (what) {
+    if (what === "minus") return bumpScore(-0.5);
+    if (what === "plus") return bumpScore(0.5);
+    if (what === "prev") go(-1);
+    else if (what === "next") go(1);
+    else if (what === "ok") await commit();
+    $("panel").scrollTop = 0;
+  };
+  window.toggleList = function () { $("sidebar").classList.toggle("open"); };
+
   window.openHelp = function () { $("helpOv").classList.remove("hidden"); };
   window.closeHelp = function () { $("helpOv").classList.add("hidden"); };
 
@@ -904,7 +998,7 @@
   });
   $("sidebar").addEventListener("click", (e) => {
     const row = e.target.closest(".srow");
-    if (row) jump(parseInt(row.dataset.i, 10));
+    if (row) { jump(parseInt(row.dataset.i, 10)); $("sidebar").classList.remove("open"); }
   });
 
   // ---------- boot ----------
