@@ -170,6 +170,18 @@
     .rp-barq i { display:block; height:100%; background:#3b6ea5; border-radius:5px; }
     .rp-enc { background:#eef6ef; border-left:4px solid #2e7d4f; padding:10px 14px; margin-top:14px; font-size:14px; line-height:1.45; }
     .rp-rev { border:1px solid #d6dde6; border-radius:6px; padding:10px 14px; margin-top:14px; font-size:14px; }
+    .rp-good { border-color:#b7dcc2; background:#f3faf5; } .rp-next { border-color:#c9d7ee; background:#f5f8fd; }
+    .rp-ex { color:#555; } .rp-prat { font-size:13px; color:#444; margin-top:4px; }
+    .rp-sk { padding:7px 0; border-top:1px solid #edf0f3; } .rp-sk:first-of-type { border-top:0; }
+    .rp-sktop { display:flex; align-items:center; gap:10px; }
+    .rp-sknome { flex:1; font-weight:600; } .rp-sktop .rp-barq { width:110px; flex:none; }
+    .rp-skpts { min-width:86px; text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .rp-skex { font-size:13px; color:#555; margin-top:2px; }
+    .rp-alem { background:#f5f8fd; border-left-color:#3b6ea5; }
+    .rp-start { border-color:#c9d7ee; background:#f5f8fd; }
+    .rp-all > summary { cursor:pointer; font-weight:600; color:#3b6ea5; } .rp-all[open] > summary { margin-bottom:6px; }
+    .rp-skok { background:#eef7f0; margin:0 -8px; padding:7px 8px; border-radius:5px; }
+    .rp-skok .rp-barq i { background:#2e8b57; } .rp-skok .rp-sknome::before { content:"✓ "; color:#2e8b57; }
     .rp-rev h3 { margin:0 0 4px; font-size:15px; } .rp-rev ul { margin:6px 0 0 18px; padding:0; } .rp-rev li { margin:4px 0; line-height:1.4; }
     .rp-qhead { display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; }
     .rp-qtitle { font-size:17px; font-weight:600; }
@@ -1916,6 +1928,70 @@
       showView(true);
     }
 
+    // Homework lists on Moodle: "06" -> "Lista 06 (Conjuntos)"
+    const LISTAS = { "05": "Métodos de Demonstração", "06": "Conjuntos", "07": "Funções",
+                     "08": "Cardinalidade", "09": "Indução" };
+    const joinE = (xs) => xs.length < 2 ? xs.join("") : xs.slice(0, -1).join(", ") + " e " + xs[xs.length - 1];
+    const fmtEx = (ex) => (ex || []).map(([l, ns]) =>
+      `Lista ${l}${LISTAS[l] ? " (" + LISTAS[l] + ")" : ""}, ex. ${joinE(ns.map(String))}`).join(" · ");
+
+    // Activities: every skill with the student's points on it and the homework
+    // exercises that train it (computed by the function from the teacher-checked table).
+    function renderSummary(s, ex) {
+      const isMet = (k) => k.possible && k.earned >= 0.9 * k.possible;   // met (100% or close): green
+      const sm = ex.summary, toDo = sm.skills.filter((k) => !isMet(k)).length;
+      const low = ex.grade !== null && ex.grade < 50;   // lower grades: 2 exercises first, the full list folded
+      const skRow = (k) => {
+        const met = isMet(k);
+        const row = el("div", "rp-sk" + (met ? " rp-skok" : ""));
+        const top = el("div", "rp-sktop");
+        top.appendChild(el("span", "rp-sknome", k.nome));
+        const bar = el("div", "rp-barq"), fill = el("i");
+        fill.style.width = (k.possible ? Math.round(100 * k.earned / k.possible) : 0) + "%";
+        bar.appendChild(fill); top.appendChild(bar);
+        top.appendChild(el("span", "rp-skpts", k.possible ? `${fmt(k.earned)} / ${fmt(k.possible)}` : "não respondida"));
+        row.appendChild(top);
+        const txt = k.dica ? k.dica : k.ex.length ? (met ? "Exercícios relacionados: " : "Para praticar: ") + fmtEx(k.ex) + "." : "";
+        if (txt) row.appendChild(el("div", "rp-skex", txt));
+        return row;
+      };
+      if (low) {
+        // lower grades: a short starting point first; the full list stays one click away
+        s.appendChild(el("div", "rp-enc", "Cada atividade é só uma parte da nota, e ainda temos mais atividades, " +
+          "provas e os exercícios. Para começar, faça os dois exercícios abaixo, e procure os monitores ou os " +
+          "professores se tiver dúvidas."));
+        const ok = sm.skills.filter(isMet);
+        if (ok.length) {
+          const g = el("div", "rp-rev rp-skills"); g.appendChild(el("h3", null, "O que você já acertou"));
+          for (const k of ok) g.appendChild(skRow(k));
+          s.appendChild(g);
+        }
+        if (sm.start && sm.start.length) {
+          const st = el("div", "rp-rev rp-start"); st.appendChild(el("h3", null, "Por onde começar"));
+          const ul = el("ul");
+          for (const k of sm.start) {
+            const li = el("li"); li.appendChild(el("b", null, k.nome + ": "));
+            li.appendChild(document.createTextNode(fmtEx(k.ex) + "."));
+            ul.appendChild(li);
+          }
+          st.appendChild(ul); s.appendChild(st);
+        }
+        const d = el("details", "rp-rev rp-skills rp-all");
+        d.appendChild(el("summary", null, `Ver todas as suas competências (${sm.skills.length}, das quais ${toDo} a melhorar)`));
+        for (const k of sm.skills) d.appendChild(skRow(k));
+        s.appendChild(d);
+        return;
+      }
+      if (ex.grade !== null && ex.grade >= 90 && sm.alem && sm.alem.length) {
+        const a = el("div", "rp-enc rp-alem"); a.appendChild(el("b", null, "Para ir além: "));
+        a.appendChild(document.createTextNode(fmtEx(sm.alem) + "."));
+        s.appendChild(a);
+      }
+      const box = el("div", "rp-rev rp-skills"); box.appendChild(el("h3", null, "Suas competências nesta atividade"));
+      for (const k of sm.skills) box.appendChild(skRow(k));
+      s.appendChild(box);
+    }
+
     function renderExam(box, ex, nome) {
       const quiz = ex.kind === "atividade";
       const s = el("div", "card top");
@@ -1955,6 +2031,8 @@
           "monitores ou os professores se tiver dúvidas.");
         s.appendChild(e);
       }
+      if (ex.summary) { renderSummary(s, ex); box.appendChild(s); }
+      else {
       const rev = el("div", "rp-rev"); rev.appendChild(el("h3", null, "Pontos a revisar"));
       const ul = el("ul");
       for (const q of ex.questions) {
@@ -1969,12 +2047,14 @@
       else rev.appendChild(el("div", null, "Todos os critérios do barema foram atendidos. Parabéns!"));
       s.appendChild(rev);
       box.appendChild(s);
+      }
 
       for (const q of ex.questions) {
         const c = el("div", "card rp-qcard");
         const head = el("div", "rp-qhead");
         const left = el("div"); left.appendChild(el("div", "rp-qtitle", `Questão ${q.numero} · ${q.titulo}`));
         if (q.grader) left.appendChild(el("div", "rp-grader", "Corrigida por " + q.grader));
+        if (q.praticar && q.praticar.length) left.appendChild(el("div", "rp-prat", "Para praticar: " + fmtEx(q.praticar) + "."));
         const sc = el("div", "rp-score", q.score === null ? "—" : fmt(q.score) + " ");
         sc.appendChild(el("small", null, "/ " + fmt(q.max)));
         head.appendChild(left); head.appendChild(sc); c.appendChild(head);
@@ -1986,7 +2066,10 @@
         for (const k of q.criteria) {
           const tr = el("tr", k.met ? "" : "rp-miss");
           tr.appendChild(el("td", "rp-mark " + (k.met ? "rp-ok" : "rp-no"), k.met ? "✓" : "✗"));
-          const td = el("td"); td.appendChild(el("div", "rp-lab", k.label)); if (k.detail) td.appendChild(el("div", "rp-det", k.detail));
+          // activities with skills: the question header says what is trained; the
+          // barème description stays only where the point was missed (what was expected)
+          const td = el("td"); td.appendChild(el("div", "rp-lab", k.label));
+          if (k.detail && !(ex.summary && k.met)) td.appendChild(el("div", "rp-det", k.detail));
           tr.appendChild(td);
           tr.appendChild(el("td", "rp-pts", `${fmt(k.met ? k.pts : 0)} / ${fmt(k.pts)}`));
           ct.appendChild(tr);

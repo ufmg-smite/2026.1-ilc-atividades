@@ -115,16 +115,25 @@ async function classStats(runId: string, base: number) {
   const evs: any[] = [];
   for (let i = 0; i < items.length; i += 150) {   // keep the URL short
     evs.push(...await rows(`correction_events?item_id=in.${inList(items.slice(i, i + 150).map((x) => x.id))}` +
-      `&kind=in.(accept,override,reopen)&select=item_id,kind,score&order=created_at.asc&limit=5000`));
+      `&kind=in.(accept,override,reopen)&select=item_id,kind,score,criteria&order=created_at.asc&limit=5000`));
   }
-  const dec: Record<string, number> = {};
-  for (const e of evs) { if (e.kind === "reopen") delete dec[e.item_id]; else dec[e.item_id] = Number(e.score); }
+  const dec: Record<string, number> = {}, decCrit: Record<string, any> = {};
+  for (const e of evs) {
+    if (e.kind === "reopen") { delete dec[e.item_id]; delete decCrit[e.item_id]; }
+    else { dec[e.item_id] = Number(e.score); decCrit[e.item_id] = e.criteria || {}; }
+  }
+  // share of graded answers meeting each criterion: { question_id: { key: [met, n] } }
+  const critRate: Record<string, Record<string, [number, number]>> = {};
   const byType: Record<string, number[]> = {}, byStudent: Record<string, { pts: number; n: number; graded: number }> = {};
   for (const it of items) {
     const st = (byStudent[it.student_key] ||= { pts: 0, n: 0, graded: 0 });
     st.n++;
     if (it.id in dec) {
       st.graded++; st.pts += dec[it.id];
+      const qr = (critRate[it.question_id] ||= {});
+      for (const [k, v] of Object.entries(decCrit[it.id] as Record<string, any>)) {
+        const r = (qr[k] ||= [0, 0]); r[1]++; if (v && v.met) r[0]++;
+      }
       (byType[qtype(it.question_id)] ||= []).push(dec[it.id]);
     }
   }
@@ -132,7 +141,7 @@ async function classStats(runId: string, base: number) {
     .map((s) => Math.min(100, Math.round((s.pts / base) * 100)));
   const byTypeMed: Record<string, number | null> = {};
   for (const [t, xs] of Object.entries(byType)) byTypeMed[t] = median(xs);
-  return { medianGrade: median(grades), byType: byTypeMed };
+  return { medianGrade: median(grades), byType: byTypeMed, critRate };
 }
 
 // ---------- one exam or activity, for one verified student ----------
@@ -152,7 +161,7 @@ async function buildExam(run: any, studentKey: string) {
     rows(`correction_events?item_id=in.${inList(items.map((i) => i.id))}&kind=in.(accept,override,reopen)` +
       `&select=item_id,kind,score,criteria,rubric,actor_email,created_at&order=created_at.asc`),
     rows(`correction_criteria?run_id=eq.${rid}&active=eq.true&select=question_id,key,label,detail,points,position`),
-    rows(`report_questions?run_id=eq.${rid}&select=question_id,numero,titulo,gabarito_html`),
+    rows(`report_questions?run_id=eq.${rid}&select=question_id,numero,titulo,gabarito_html,feedback`),
     rows(`correction_questions?run_id=eq.${rid}&select=question_id,prompt,position&order=position.asc`),
     rows(`correction_runs?id=eq.${rid}&select=source`),
     rows(`staff?select=email,name`),
@@ -196,7 +205,7 @@ async function buildExam(run: any, studentKey: string) {
     const qcrit = crit.filter((c) => c.question_id === qid)
       .sort((a, b) => (a.position ?? 99) - (b.position ?? 99));
     const criteria = qcrit.map((c) => ({
-      label: c.label ?? c.key, detail: c.detail ?? "",
+      key: c.key, label: c.label ?? c.key, detail: c.detail ?? "",
       pts: Number(c.points), met: !!(d?.criteria?.[c.key]?.met),
     }));
     const max = criteria.reduce((s, c) => s + c.pts, 0);
@@ -206,6 +215,7 @@ async function buildExam(run: any, studentKey: string) {
     if (score === null) allGraded = false; else { points += score; maxPoints += max; }
     const gab = String(meta.gabarito_html || "").replace(assetRe, (_m, p) => url[p] || "");
     return {
+      qid,                                                 // internal (skills table), removed below
       numero: meta.numero ?? ((cqm.position ?? 0) + 1),
       titulo: meta.titulo ?? (headingTitle(cqm.prompt) || qid),
       score, max, missing, delta: (score === null || missing) ? 0 : Math.round((score - sumMet) * 100) / 100,
@@ -215,12 +225,93 @@ async function buildExam(run: any, studentKey: string) {
       typed: (it && it.typed_answer) || "",                // quizzes: the typed part of the answer
       enunciado: isQuiz ? (cqm.prompt || "") : "",          // quizzes: the statement (no scan carries it)
       gabaritoHtml: gab,
+      feedback: meta.feedback || null,                     // skills + homework exercises (activities)
+      // exercises for the skills NOT fully met in this question (all of them if unanswered)
+      praticar: mergeEx(((meta.feedback && meta.feedback.skills) || [])
+        .filter((k: any) => missing || k.crit.some((key: string) => criteria.some((c) => c.key === key && !c.met)))
+        .map((k: any) => k.ex)),
     };
   }).sort((a, b) => a.numero - b.numero);
 
   const grade = allGraded && base > 0 ? Math.min(100, Math.round((points / base) * 100)) : null;
+  const summary = grade !== null && questions.some((q) => q.feedback) ? skillTable(questions, stats ? stats.critRate : {}) : null;
+  for (const q of questions) { delete (q as any).feedback; delete (q as any).qid; }
   return { runId: run.run_id, title: run.title, kind: isQuiz ? "atividade" : "prova", notaBase: base,
-           points, maxPoints, grade, medianGrade: stats ? stats.medianGrade : null, questions };
+           points, maxPoints, grade, medianGrade: stats ? stats.medianGrade : null, questions, summary };
+}
+
+// ---------- skills table (activities) ----------
+// Deterministic: report_questions.feedback (checked by the teacher) groups each
+// question's criteria into skills, each with homework exercises [["06",[2,3]], ...].
+// A skill shared by several questions is pooled; c6 ("Justificativa clara", on every
+// question) is pooled across the answered questions as its own skill. Every skill is
+// listed with the points the student got on it, best first (share of points met;
+// ties: more points first, then question order; skills with no data — only in
+// unanswered questions — last). `alem`: the activity's extension exercises (shown to
+// the strongest students). `start`: 2 skills to begin with, each with its first
+// exercise — the missed ones (under 90%) most of the class got right (class share of
+// the skill's points met), completed with skills of unanswered questions the same way.
+// Two different exercises (the second skill moves to its next one if needed).
+// The page shows it, with the list folded, when the grade is below 50.
+type Ex = [string, number[]][];
+function mergeEx(lists: Ex[]): Ex {
+  const by = new Map<string, Set<number>>();
+  for (const l of lists) for (const [lista, ns] of (l || [])) {
+    const set = by.get(lista) || new Set<number>(); by.set(lista, set);
+    for (const n of ns) set.add(n);
+  }
+  return [...by.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([l, set]) => [l, [...set].sort((a, b) => a - b)] as [string, number[]]);
+}
+const C6_NAME = "Justificativas claras";
+const C6_TIP = "Comece dizendo o que vai demonstrar e justifique cada passo.";
+function skillTable(questions: any[], critRate: Record<string, Record<string, [number, number]>>) {
+  type Sk = { id: string; nome: string; earned: number; possible: number; ex: Ex[]; order: number;
+              cNum?: number; cDen?: number };
+  const skills = new Map<string, Sk>();
+  const c6: Sk = { id: "c6", nome: C6_NAME, earned: 0, possible: 0, ex: [], order: 1e6 };
+  let order = 0;
+  const alem: Ex[] = [];
+  for (const q of questions) {
+    const fb = q.feedback;
+    if (!fb) continue;
+    if (fb.alem) alem.push(fb.alem);
+    const byKey: Record<string, any> = {};
+    for (const c of q.criteria) byKey[c.key] = c;
+    for (const sk of fb.skills || []) {
+      const cur: Sk = skills.get(sk.id) || { id: sk.id, nome: sk.nome, earned: 0, possible: 0, ex: [] as Ex[], order: order++ };
+      for (const k of sk.crit) {
+        const c = byKey[k]; if (!c) continue;
+        if (!q.missing) { cur.possible += c.pts; if (c.met) cur.earned += c.pts; }
+        const r = critRate[q.qid]?.[k];
+        if (r && r[1]) { cur.cNum = (cur.cNum || 0) + c.pts * r[0] / r[1]; cur.cDen = (cur.cDen || 0) + c.pts; }
+      }
+      cur.ex.push(sk.ex); skills.set(sk.id, cur);
+    }
+    const k6 = byKey["c6"];
+    if (k6 && !q.missing) { c6.possible += k6.pts; if (k6.met) c6.earned += k6.pts; }
+  }
+  const all = [...skills.values(), ...(c6.possible ? [c6] : [])];
+  const ratio = (s: Sk) => s.possible ? s.earned / s.possible : -1;
+  const list = all.sort((a, b) => ratio(b) - ratio(a) || b.possible - a.possible || a.order - b.order).map((s) => ({
+    nome: s.nome, earned: s.earned, possible: s.possible,          // possible 0 = not answered
+    ex: s.id === "c6" ? [] : mergeEx(s.ex), dica: s.id === "c6" ? C6_TIP : undefined,
+  }));
+  const classRate = (s: Sk) => s.cDen ? s.cNum! / s.cDen : 0;
+  const byRate = (a: Sk, b: Sk) => classRate(b) - classRate(a) || a.order - b.order;
+  const cand = all.filter((s) => s.id !== "c6");
+  const start = [
+    ...cand.filter((s) => s.possible > 0 && s.earned < 0.9 * s.possible).sort(byRate),
+    ...cand.filter((s) => s.possible === 0).sort(byRate),
+  ].slice(0, 2);
+  const used = new Set<string>();
+  const startOut = start.map((s) => {
+    const opts = mergeEx(s.ex).flatMap(([l, ns]) => ns.map((n) => [l, n] as [string, number]));
+    const pick = opts.find(([l, n]) => !used.has(`${l}-${n}`)) || opts[0];
+    used.add(`${pick[0]}-${pick[1]}`);
+    return { nome: s.nome, ex: [[pick[0], [pick[1]]]] as Ex };
+  });
+  return { skills: list, alem: mergeEx(alem), start: startOut };
 }
 
 Deno.serve(async (req) => {
