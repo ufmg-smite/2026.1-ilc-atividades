@@ -132,7 +132,8 @@
     <label>Descrição (Markdown, opcional)</label>
     <textarea id="qdesc" placeholder="Instruções gerais…"></textarea>
     <label>Duração (minutos)</label>
-    <input id="qdur" type="number" value="480" min="1" />
+    <input id="qdur" type="number" value="480" min="1" oninput="showDurEnd()" />
+    <p class="hint" id="qdurEnd"></p>
     <label>Entrega em aula — janela presencial (minutos)</label>
     <input id="qicm" type="number" min="1" value="30" placeholder="em branco = desativado" />
     <p class="hint">Trava <b>1 questão</b> (a escolhida pelo aluno) no fim dessa janela; o resto segue
@@ -198,6 +199,17 @@
     // Defaults for a NEW quiz (still editable in the form).
     const DEFAULT_DESC = "Esta é uma atividade prática individual sobre o conteúdo visto em aula.  Tente resolver todas as questões e explique brevemente seu raciocínio quando necessário. As respostas não precisam estar perfeitas, mas devem apresentar uma tentativa séria e indicar o que você compreendeu ou onde encontrou dificuldade.";
     const DEFAULT_DUR = 480;
+    // Under the duration field: when the quiz would close if opened right now.
+    window.showDurEnd = function () {
+      const m = parseInt($("qdur").value, 10);
+      if (!(m > 0)) { $("qdurEnd").textContent = ""; return; }
+      const end = new Date(Date.now() + m * 60000);
+      const day = end.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" });
+      const time = end.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      const h = Math.floor(m / 60), r = m % 60;
+      $("qdurEnd").textContent = `= ${h ? h + " h" : ""}${h && r ? " " : ""}${r ? r + " min" : ""}` +
+        ` · se aberto agora, fecha ${day} às ${time}`;
+    };
     const DEFAULT_ICM = 30; // in-class window: on by default for new quizzes
     const loadSession = () => { try { return JSON.parse(localStorage.getItem(SESS_LS) || "null"); } catch { return null; } };
     const saveSession = (s) => localStorage.setItem(SESS_LS, JSON.stringify(s));
@@ -694,6 +706,7 @@
         $("qicm").value = DEFAULT_ICM; $("qproof").checked = false;
         addQuestion("q1", "");
       }
+      showDurEnd();
       $("editor").classList.remove("hidden");
       $("editor").scrollIntoView({ behavior: "smooth" });
       editorBaseline = editorState(); // fields populated -> mark as clean
@@ -705,7 +718,7 @@
       block.innerHTML =
         `<div class="qhead"><strong>Questão <span class="qidlabel"></span></strong>` +
         `<label class="qdurlab" title="Tempo só desta questão, em minutos. Em branco = usa o tempo global do quiz.">` +
-        `⏱ <input class="qdur" type="number" min="1" max="600" placeholder="global" /> min</label>` +
+        `⏱ <input class="qdur" type="number" min="1" placeholder="global" /> min</label>` +
         `<button class="close rm" type="button">Remover</button></div>`;
       block.querySelector(".qidlabel").textContent = "(" + qid + ")";
       if (Number.isFinite(durationMinutes) && durationMinutes > 0) {

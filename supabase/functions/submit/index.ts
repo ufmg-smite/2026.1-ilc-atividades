@@ -65,6 +65,10 @@ async function getQuiz(quizId: string) {
   return rows[0] ?? null;
 }
 
+// Upper bound on any quiz/question duration: a typo guard only (an extra zero),
+// not a policy — a quiz may stay open for days.
+const MAX_DURATION_MIN = 30 * 24 * 60;
+
 // Per-question timing: a question may carry its own `durationMinutes` (stored in
 // the questions JSON); blank/absent = use the quiz's global duration_minutes. All
 // questions share the same opened_at, so a question's deadline is simply
@@ -574,7 +578,7 @@ Deno.serve(async (req) => {
       }
 
       const dur = Number.isFinite(p.durationMinutes) && p.durationMinutes > 0
-        ? Math.min(Math.floor(p.durationMinutes), 600)
+        ? Math.min(Math.floor(p.durationMinutes), MAX_DURATION_MIN)
         : 30;
       // Optional in-class window (minutes). Must be below the global duration to
       // mean anything; null = feature off (ordinary single-phase quiz).
@@ -599,7 +603,7 @@ Deno.serve(async (req) => {
       const cleanQuestions = questions.map((q: any) => {
         const out: any = { id: q.id, prompt: q.prompt };
         const d = Number(q.durationMinutes);
-        if (Number.isFinite(d) && d > 0) out.durationMinutes = Math.min(Math.floor(d), 600);
+        if (Number.isFinite(d) && d > 0) out.durationMinutes = Math.min(Math.floor(d), MAX_DURATION_MIN);
         return out;
       });
       const body = { title, description: description ?? null, questions: cleanQuestions,
