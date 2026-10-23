@@ -245,7 +245,8 @@
       <table class="crit" id="critTable"></table>
     </div>
 
-    <div class="sect" id="sectTransc">
+    <!-- hidden by default: the transcription is read with "v" on the left; "t" opens this to edit it -->
+    <div class="sect hidden" id="sectTransc">
       <label>Transcrição <span class="hint">(t edita · Enter salva e re-avalia · g re-avalia)</span></label>
       <textarea id="transc" rows="6"></textarea>
     </div>
@@ -303,7 +304,7 @@
       <kbd>Enter</kbd><span>confirma a nota e avança</span>
       <kbd>1</kbd>…<kbd>9</kbd><span>liga/desliga um critério (recalcula a nota)</span>
       <kbd>e</kbd><span>editar a justificativa</span>
-      <kbd>t</kbd><span>editar a transcrição</span>
+      <kbd>t</kbd><span>mostrar/ocultar o painel para editar a transcrição</span>
       <kbd>g</kbd><span>re-avaliar esta resposta com o modelo</span>
       <kbd>b</kbd><span>abrir o barema</span>
       <kbd>r</kbd><span>girar a imagem 90°</span>
@@ -991,7 +992,9 @@
       case "ArrowRight": e.preventDefault(); if (e.ctrlKey || e.metaKey) pan(-100, 0); else go(1); break;
       case "Enter":      e.preventDefault(); await commit(); break;
       case "e":          e.preventDefault(); $("justif").focus(); break;
-      case "t":          e.preventDefault(); $("transc").focus(); break;
+      case "t":          e.preventDefault();
+                         if ($("sectTransc").classList.toggle("hidden")) break;
+                         $("transc").focus(); break;
       case "g":          e.preventDefault(); await regrade(); break;
       case "b":          e.preventDefault(); openRubric(); break;
       case "r":          e.preventDefault(); rotate(); break;
