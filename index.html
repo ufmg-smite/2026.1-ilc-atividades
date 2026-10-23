@@ -2104,7 +2104,8 @@
         if (q.gabaritoHtml) {
           const g = el("div", "rp-gab"); g.appendChild(el("h3", null, "Gabarito"));
           const body = el("div");
-          body.innerHTML = window.DOMPurify ? DOMPurify.sanitize(q.gabaritoHtml) : "";
+          // exams: HTML (with figures); activities: Markdown + LaTeX, like the statements
+          body.innerHTML = quiz ? rich(q.gabaritoHtml) : window.DOMPurify ? DOMPurify.sanitize(q.gabaritoHtml) : "";
           g.appendChild(body); c.appendChild(g);
         }
         box.appendChild(c);
