@@ -2031,9 +2031,8 @@
       if (ex.grade !== null && ex.grade >= 90 && sm.alem && sm.alem.length) {
         const all = ex.questions.every((q) => !q.missing && q.criteria.every((c) => c.met));
         const a = el("div", "rp-enc rp-alem");
-        a.appendChild(el("b", null, "Parabéns"));
-        a.appendChild(document.createTextNode(`, você atendeu a ${all ? "todos os" : "quase todos os"} critérios desta atividade. `));
-        a.appendChild(el("b", null, "Para ir além: "));
+        a.appendChild(document.createTextNode(`Parabéns, você atendeu a ${all ? "todos os" : "quase todos os"} critérios desta atividade! `));
+        a.appendChild(el("b", null, "Se quiser ir além: "));
         a.appendChild(document.createTextNode(fmtEx(sm.alem) + "."));
         s.appendChild(a);
       }
