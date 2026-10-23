@@ -599,9 +599,12 @@
     // Optimistic: record the decision locally and move on at once; the save runs in
     // the background. If it fails, the answer goes back to its previous state and
     // the error names the student, so nothing is silently lost.
+    // Freeze everything sent NOW: go(1) below loads the next answer into the shared
+    // `score`/`met` state, so reading them after moving on would save the wrong grade.
     const kind = untouched ? "accept" : "override";
+    const finalScore = score;
     const prev = it.decision;
-    const dec = { score, justification, criteria, kind, by: EMAIL, at: new Date().toISOString(), pending: true };
+    const dec = { score: finalScore, justification, criteria, kind, by: EMAIL, at: new Date().toISOString(), pending: true };
     it.decision = dec;
 
     // A repeated identical correction in a cluster becomes the cluster's new
@@ -610,7 +613,7 @@
     propagateInCluster(it);
 
     if (IDX < ITEMS.length - 1) go(1); else render();
-    api({ action: "commit", itemId: it.id, kind, score, justification, criteria })
+    api({ action: "commit", itemId: it.id, kind, score: finalScore, justification, criteria })
       .catch(() => ({ ok: false, data: { message: "sem conexão" } }))
       .then((r) => {
         if (it.decision !== dec) return;                     // superseded by a newer decision
