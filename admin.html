@@ -325,7 +325,7 @@
     const RELAT_URL = "https://rftveyvbitiysymutdir.supabase.co/functions/v1/relatorios";
     var RELAT = null;                                   // { runs, students } (var: setAuthUI may run first)
     async function loadRelat() {
-      $("relatCard").classList.remove("hidden");
+      syncRelat();
       $("relatMsg").textContent = "Carregando a lista de alunos…";
       const token = await getValidToken();
       let r, d = {};
@@ -360,6 +360,22 @@
       $("relatMsg").textContent = `${rowsHtml.length} aluno(s). Clique no nome ou numa nota para abrir o relatório em outra aba.` +
         (RELAT.runs.some((x) => !x.published) ? " * = não publicado." : "");
     }
+    // The reports card is the default view: any other panel (editor, analysis, entrega,
+    // correction draft) takes its place while open, so the page does not grow and scroll.
+    const PANELS = ["editor", "analysisCard", "entregaCard", "corrCard"];
+    function syncRelat() {
+      const busy = PANELS.some((id) => !$(id).classList.contains("hidden"));
+      $("relatCard").classList.toggle("hidden", busy || !ROLE);
+    }
+    const panelWatch = new MutationObserver(syncRelat);
+    for (const id of PANELS) panelWatch.observe($(id), { attributes: true, attributeFilter: ["class"] });
+    $("relatLink").addEventListener("click", (e) => {        // back to the reports: close the other panels
+      e.preventDefault();
+      if (!$("editor").classList.contains("hidden")) closeEditor();
+      if (!$("editor").classList.contains("hidden")) return;   // unsaved changes kept
+      for (const id of PANELS) $(id).classList.add("hidden");
+      syncRelat(); $("relatCard").scrollIntoView({ behavior: "smooth" });
+    });
     $("relatSearch").addEventListener("input", drawRelat);
     $("relatDoc").addEventListener("change", drawRelat);
     $("relatReload").addEventListener("click", loadRelat);
