@@ -1900,14 +1900,55 @@
       render(data);
     }
 
+    // ---------- staff view: ./?ver=<matrícula>&doc=<run_id>, opened from the admin page ----------
+    // Uses the staff Google session the admin/correction pages keep in this browser
+    // (same origin); the function checks it against the staff allowlist. No access code.
+    const SUPA = "https://rftveyvbitiysymutdir.supabase.co";
+    const ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJmdHZleXZiaXRpeXN5bXV0ZGlyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzNzczNjMsImV4cCI6MjEwMTk1MzM2M30.N1Pg5DV5S1vxx_fo6gKsYtGHoEN2xqRXEoBX58Avako";
+    async function staffToken() {
+      let s; try { s = JSON.parse(localStorage.getItem("ilc-supa-session") || "null"); } catch { s = null; }
+      if (!s || !s.access_token) return null;
+      if (Date.now() < s.expires_at - 60000) return s.access_token;
+      if (!s.refresh_token) return null;
+      try {
+        const r = await fetch(`${SUPA}/auth/v1/token?grant_type=refresh_token`, { method: "POST",
+          headers: { apikey: ANON, "Content-Type": "application/json" }, body: JSON.stringify({ refresh_token: s.refresh_token }) });
+        if (!r.ok) return null;
+        const d = await r.json();
+        localStorage.setItem("ilc-supa-session", JSON.stringify({ access_token: d.access_token,
+          refresh_token: d.refresh_token, expires_at: Date.now() + (d.expires_in || 3600) * 1000 }));
+        return d.access_token;
+      } catch { return null; }
+    }
+    async function staffView() {
+      const q = new URLSearchParams(location.search), mat = (q.get("ver") || "").replace(/\D/g, "");
+      if (!mat) return;
+      const box = $("rpExams"); box.innerHTML = ""; showView(true);
+      $("rpBack").style.display = "none"; $("rpLogout").style.display = "none";
+      $("rpHello").textContent = "Carregando…";
+      const token = await staffToken();
+      const fail = (t) => { $("rpHello").textContent = ""; const c = el("div", "card"); c.appendChild(el("p", "desc", t)); box.appendChild(c); };
+      if (!token) return fail("Entre primeiro no painel do professor (conta Google da equipe) neste navegador.");
+      let r, data = {};
+      try {
+        r = await fetch(URL_RELAT, { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+                                     body: JSON.stringify({ action: "staffReport", matricula: mat }) });
+        data = await r.json().catch(() => ({}));
+      } catch { return fail("Sem conexão — tente de novo."); }
+      if (!r.ok || !data.ok) return fail(data.message || "Não foi possível carregar o relatório.");
+      render({ ...data, staffView: true }, q.get("doc"));
+    }
+
     function showView(on) {
       $("login").classList.toggle("hidden", on);
       $("rpView").classList.toggle("hidden", !on);
       window.scrollTo(0, 0);
     }
 
-    function render(data) {
-      $("rpHello").textContent = "Olá, " + titleCase(String(data.nome || "").split(" ")[0]) + "!";
+    function render(data, docId) {
+      $("rpHello").textContent = data.staffView
+        ? "Visualização da equipe: " + titleCase(String(data.nome || "")) + " (" + data.matricula + ")"
+        : "Olá, " + titleCase(String(data.nome || "").split(" ")[0]) + "!";
       const box = $("rpExams"); box.innerHTML = "";
       if (!data.exams || !data.exams.length) {
         const c = el("div", "card"); c.appendChild(el("p", "desc", "Nenhuma correção disponível ainda."));
@@ -1922,11 +1963,13 @@
           [...tabs.children].forEach((b, k) => b.classList.toggle("rp-tab-on", k === i));
         };
         data.exams.forEach((ex, i) => {
-          const b = el("button", "rp-tab", ex.title + (ex.grade != null ? " · " + ex.grade : ""));
+          const b = el("button", "rp-tab", ex.title + (ex.grade != null ? " · " + ex.grade : "") +
+                                               (ex.published === false ? " (não publicado)" : ""));
           b.type = "button"; b.addEventListener("click", () => show(i)); tabs.appendChild(b);
         });
         box.appendChild(tabs); box.appendChild(pane);
-        show(data.exams.length - 1);
+        const want = data.exams.findIndex((ex) => ex.runId === docId);
+        show(want >= 0 ? want : data.exams.length - 1);
       }
       showView(true);
     }
@@ -2147,6 +2190,7 @@
     if (saved && saved.mat && saved.code) {
       $("rpMat").value = saved.mat; $("rpCode").value = saved.code; $("rpRemember").checked = true;
     }
+    staffView();
   })();
   </script>
 </body>

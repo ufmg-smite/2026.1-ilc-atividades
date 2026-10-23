@@ -45,6 +45,13 @@
     .preview code { background:#f5f2fb; padding:1px 5px; border-radius:4px; }
     .hidden { display:none; }
     .hint { font-size:12px; color:#5f6368; margin-top:4px; }
+    .navlinks { margin-top:10px; } .navbtn { display:inline-block; padding:7px 12px; border:1px solid #dadce0;
+      border-radius:6px; text-decoration:none; color:#1a73e8; font-size:14px; background:#fff; }
+    .navbtn:hover { background:#f1f3f4; }
+    table.relat th { text-align:left; font-size:12px; color:#5f6368; font-weight:600; padding:6px 6px; border-bottom:1px solid #dadce0; white-space:nowrap; }
+    table.relat td { padding:6px; border-bottom:1px solid #f1f3f4; font-size:14px; }
+    table.relat td.g { text-align:center; white-space:nowrap; } table.relat a { color:#1a73e8; text-decoration:none; }
+    table.relat .mat { color:#5f6368; font-variant-numeric:tabular-nums; font-size:13px; }
   </style>
 </head>
 <body>
@@ -70,6 +77,11 @@
         <span id="whoRole" class="pill on"></span>
         <button class="ghost" id="logoutBtn" style="margin-left:8px;padding:4px 10px;">Sair</button></p>
       <p class="sub">Crie e edite quizzes, abra/feche a sessão, veja as respostas.</p>
+      <div class="row navlinks">
+        <a class="navbtn" href="./correcao.html">📝 Correção das provas e atividades</a>
+        <a class="navbtn" href="#relatCard" id="relatLink">📄 Relatórios dos alunos</a>
+        <a class="navbtn" href="./" target="_blank" rel="noopener">Página dos alunos ↗</a>
+      </div>
       <div class="row">
         <button class="add" id="newBtn">+ Novo quiz</button>
       </div>
@@ -80,6 +92,20 @@
     </div>
     <div id="msg"></div>
     <table class="qlist"><tbody id="quizRows"></tbody></table>
+  </div>
+
+  <!-- ===== students' reports (staff view, no access code) ===== -->
+  <div class="card hidden" id="relatCard">
+    <h2>Relatórios dos alunos</h2>
+    <p class="sub">Abra o relatório de qualquer aluno como ele o vê, sem matrícula + código.
+      Documentos ainda não publicados também aparecem (marcados). Cada visualização fica registrada.</p>
+    <div class="row">
+      <input id="relatSearch" placeholder="Buscar por nome ou matrícula" style="flex:1;min-width:180px;">
+      <select id="relatDoc" style="padding:9px;border:1px solid #dadce0;border-radius:6px;font:inherit;"></select>
+      <button class="ghost" id="relatReload" style="padding:8px 12px;">Atualizar</button>
+    </div>
+    <div id="relatMsg" class="hint"></div>
+    <div style="overflow-x:auto"><table class="qlist relat"><thead id="relatHead"></thead><tbody id="relatRows"></tbody></table></div>
   </div>
 
   <!-- ===== analysis output ===== -->
@@ -269,6 +295,7 @@
       } else {
         $("loggedIn").classList.add("hidden");
         $("loggedOut").classList.remove("hidden");
+        $("relatCard").classList.add("hidden"); RELAT = null;
         ROLE = null;
       }
       applyRoleUI();
@@ -282,7 +309,7 @@
       const t = await getValidToken();
       if (!t) { setAuthUI(null); return; }
       const { ok, status, data } = await api({ action: "whoami" });
-      if (ok && data.ok) { setAuthUI({ email: data.email, role: data.role }); loadList(); }
+      if (ok && data.ok) { setAuthUI({ email: data.email, role: data.role }); loadList(); loadRelat(); }
       else if (status === 403) {
         clearSession(); setAuthUI(null);
         $("msg").className = "err";
@@ -293,6 +320,49 @@
     $("googleBtn").addEventListener("click", signInGoogle);
     $("logoutBtn").addEventListener("click", signOut);
     initAuth();
+
+    // ---------- students' reports (relatorios function, staff mode) ----------
+    const RELAT_URL = "https://rftveyvbitiysymutdir.supabase.co/functions/v1/relatorios";
+    var RELAT = null;                                   // { runs, students } (var: setAuthUI may run first)
+    async function loadRelat() {
+      $("relatCard").classList.remove("hidden");
+      $("relatMsg").textContent = "Carregando a lista de alunos…";
+      const token = await getValidToken();
+      let r, d = {};
+      try {
+        r = await fetch(RELAT_URL, { method: "POST", headers: { "Content-Type": "application/json",
+          Authorization: "Bearer " + token }, body: JSON.stringify({ action: "staffList" }) });
+        d = await r.json().catch(() => ({}));
+      } catch { $("relatMsg").textContent = "Falha de conexão."; return; }
+      if (!r.ok || !d.ok) { $("relatMsg").textContent = d.message || "Não foi possível carregar a lista."; return; }
+      RELAT = d;
+      const sel = $("relatDoc"), keep = sel.value;
+      sel.innerHTML = `<option value="">Todos os documentos</option>` + d.runs.map((x) =>
+        `<option value="${escapeHtml(x.runId)}">${escapeHtml(x.title)}${x.published ? "" : " (não publicado)"}</option>`).join("");
+      if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
+      drawRelat();
+    }
+    const norm = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    function drawRelat() {
+      if (!RELAT) return;
+      const doc = $("relatDoc").value, qy = norm($("relatSearch").value.trim());
+      const runs = RELAT.runs.filter((x) => !doc || x.runId === doc);
+      $("relatHead").innerHTML = "<tr><th>Aluno</th><th>Matrícula</th>" +
+        runs.map((x) => `<th>${escapeHtml(x.title)}${x.published ? "" : " *"}</th>`).join("") + "</tr>";
+      const link = (mat, run, txt) => `<a href="./?ver=${encodeURIComponent(mat)}${run ? "&doc=" + encodeURIComponent(run) : ""}" target="_blank" rel="noopener">${txt}</a>`;
+      const rowsHtml = RELAT.students
+        .filter((s) => !qy || norm(s.nome).includes(qy) || s.matricula.includes(qy))
+        .filter((s) => !doc || doc in s.grades)
+        .map((s) => "<tr><td>" + link(s.matricula, doc, escapeHtml(String(s.nome || ""))) + `</td><td class="mat">${escapeHtml(s.matricula)}</td>` +
+          runs.map((x) => !(x.runId in s.grades) ? `<td class="g">—</td>`
+            : `<td class="g">${link(s.matricula, x.runId, s.grades[x.runId] == null ? "em correção" : String(s.grades[x.runId]))}</td>`).join("") + "</tr>");
+      $("relatRows").innerHTML = rowsHtml.join("");
+      $("relatMsg").textContent = `${rowsHtml.length} aluno(s). Clique no nome ou numa nota para abrir o relatório em outra aba.` +
+        (RELAT.runs.some((x) => !x.published) ? " * = não publicado." : "");
+    }
+    $("relatSearch").addEventListener("input", drawRelat);
+    $("relatDoc").addEventListener("change", drawRelat);
+    $("relatReload").addEventListener("click", loadRelat);
 
     // ---------- quiz list ----------
     $("showArchived").addEventListener("change", loadList);

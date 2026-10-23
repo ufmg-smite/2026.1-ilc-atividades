@@ -19,6 +19,15 @@
 //  images already in the private `answers` bucket (no copies, no PDFs).
 //  Tables: supabase/student_reports.sql, supabase/report_access.sql (+ the
 //  existing correction_* tables). Successful accesses are logged (matrícula + time).
+//
+//  Staff view (admin page), gated by a Google session + the `staff` allowlist
+//  (same check as the correction function; Authorization: Bearer <token>):
+//    { action:"staffList" }            -> { ok, runs:[{runId,title,published}],
+//                                           students:[{matricula,nome,grades:{runId: n|null}}] }
+//    { action:"staffReport", matricula } -> same payload as "report", unpublished
+//                                           documents included (exam.published=false)
+//  Staff views are logged in staff_report_views (supabase/staff_views.sql), never in
+//  report_access; no access code is ever read or returned.
 // ============================================================
 
 const CORS = {
@@ -104,6 +113,32 @@ async function signAll(paths: string[]): Promise<Record<string, string>> {
 
 // ---------- class context: medians over every graded booklet of the run ----------
 // (aggregate numbers only — no other student's data leaves this function)
+// ---------- staff auth (identical model to the correction function) ----------
+async function verifiedEmail(req: Request): Promise<string | null> {
+  const m = (req.headers.get("authorization") || "").match(/^Bearer\s+(.+)$/i);
+  if (!m) return null;
+  const res = await fetch(`${SUPA_URL}/auth/v1/user`, {
+    headers: { apikey: SERVICE, Authorization: `Bearer ${m[1]}` },
+  });
+  if (!res.ok) return null;
+  const u = await res.json().catch(() => null);
+  return ((u?.email || "").toLowerCase().trim()) || null;
+}
+async function authStaff(req: Request): Promise<{ email: string; role: string } | null> {
+  const email = await verifiedEmail(req);
+  if (!email) return null;
+  const r = await rows(`staff?email=eq.${encodeURIComponent(email)}&select=role`);
+  return r[0]?.role ? { email, role: r[0].role } : null;
+}
+async function allRows(path: string): Promise<any[]> {          // PostgREST caps at 1000 rows
+  const out: any[] = [];
+  for (let off = 0; ; off += 1000) {
+    const page = await rows(`${path}&limit=1000&offset=${off}`);
+    out.push(...page);
+    if (page.length < 1000) return out;
+  }
+}
+
 const median = (xs: number[]) => {
   if (!xs.length) return null;
   const v = [...xs].sort((a, b) => a - b), m = Math.floor(v.length / 2);
@@ -137,11 +172,14 @@ async function classStats(runId: string, base: number) {
       (byType[qtype(it.question_id)] ||= []).push(dec[it.id]);
     }
   }
-  const grades = Object.values(byStudent).filter((s) => s.graded === s.n && s.n > 0)
-    .map((s) => Math.min(100, Math.round((s.pts / base) * 100)));
+  const gradeOf = (s: { pts: number; n: number; graded: number }) =>
+    s.graded === s.n && s.n > 0 ? Math.min(100, Math.round((s.pts / base) * 100)) : null;
+  const grades = Object.values(byStudent).map(gradeOf).filter((g): g is number => g !== null);
+  const gradeByKey: Record<string, number | null> = {};
+  for (const [k, st] of Object.entries(byStudent)) gradeByKey[k] = gradeOf(st);
   const byTypeMed: Record<string, number | null> = {};
   for (const [t, xs] of Object.entries(byType)) byTypeMed[t] = median(xs);
-  return { medianGrade: median(grades), byType: byTypeMed, critRate };
+  return { medianGrade: median(grades), byType: byTypeMed, critRate, gradeByKey };
 }
 
 // ---------- one exam or activity, for one verified student ----------
@@ -288,7 +326,8 @@ function skillTable(questions: any[], critRate: Record<string, Record<string, [n
       }
       cur.ex.push(sk.ex); skills.set(sk.id, cur);
     }
-    const k6 = byKey["c6"];
+    // "Justificativa clara" is c6 when a question has 5 other criteria, c5 when it has 4
+    const k6 = q.criteria.find((c: any) => c.label === "Justificativa clara") || byKey["c6"];
     if (k6 && !q.missing) { c6.possible += k6.pts; if (k6.met) c6.earned += k6.pts; }
   }
   const all = [...skills.values(), ...(c6.possible ? [c6] : [])];
@@ -314,14 +353,61 @@ function skillTable(questions: any[], critRate: Record<string, Record<string, [n
   return { skills: list, alem: mergeEx(alem), start: startOut };
 }
 
+// ---------- staff view (admin page) ----------
+async function staff(req: Request, p: Record<string, any>): Promise<Response> {
+  const who = await authStaff(req);
+  if (!who) return json({ error: "denied", message: "Acesso restrito à equipe (entre com a conta Google autorizada)." }, 403);
+  const runs = await rows(`report_runs?select=run_id,title,nota_base,published,created_at&order=created_at.asc`);
+
+  if (p.action === "staffList") {
+    const [students, links] = await Promise.all([
+      allRows(`student_access?active=eq.true&preview=eq.false&select=matricula,nome&order=matricula`),
+      allRows(`report_students?select=run_id,matricula,student_key&order=run_id,matricula`),
+    ]);
+    const stats: Record<string, Record<string, number | null>> = {};
+    for (const r of runs) {
+      const base = Number(r.nota_base) || 0;
+      stats[r.run_id] = base > 0 ? (await classStats(r.run_id, base)).gradeByKey : {};
+    }
+    const byMat: Record<string, Record<string, number | null>> = {};
+    for (const l of links) (byMat[l.matricula] ||= {})[l.run_id] = stats[l.run_id]?.[l.student_key] ?? null;
+    return json({ ok: true,
+      runs: runs.map((r) => ({ runId: r.run_id, title: r.title, published: !!r.published })),
+      students: students
+        .map((s) => ({ matricula: s.matricula, nome: s.nome, grades: byMat[s.matricula] || {} }))
+        .sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR", { sensitivity: "base" })),
+    }, 200);
+  }
+
+  // staffReport: one student's documents, published or not
+  const mat = normMatricula(p.matricula);
+  if (!mat) return json({ error: "missing", message: "Informe a matrícula." }, 400);
+  const acc = (await rows(`student_access?matricula=eq.${encodeURIComponent(mat)}&select=matricula,nome`))[0];
+  const links = await rows(`report_students?matricula=eq.${encodeURIComponent(mat)}&select=run_id,student_key`);
+  if (!acc && !links.length) return json({ error: "not_found", message: "Matrícula não encontrada." }, 404);
+  try {                                    // who looked at whose report (staff only; never report_access)
+    const r = await db(`staff_report_views`, { method: "POST", headers: { Prefer: "return=minimal" },
+                                               body: JSON.stringify({ staff_email: who.email, matricula: mat }) });
+    if (!r.ok) console.error("staff_report_views", r.status);
+  } catch (e) { console.error("staff_report_views", e); }
+  const exams: any[] = [];
+  for (const run of runs) {
+    const link = links.find((l) => l.run_id === run.run_id);
+    const ex = link ? await buildExam(run, link.student_key) : null;
+    if (ex) exams.push({ ...ex, published: !!run.published });
+  }
+  return json({ ok: true, nome: acc ? acc.nome : mat, matricula: mat, exams }, 200);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   let p: Record<string, any>;
   try { p = await req.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
-  if (!p || p.action !== "report") return json({ error: "Unknown action" }, 400);
+  if (!p || !["report", "staffList", "staffReport"].includes(p.action)) return json({ error: "Unknown action" }, 400);
 
   try {
+    if (p.action === "staffList" || p.action === "staffReport") return await staff(req, p);
     const mat = normMatricula(p.matricula), code = normCode(p.code);
     if (!mat || !code) return json({ error: "missing", message: "Informe a matrícula e o código." }, 400);
     const ip = clientIp(req);
