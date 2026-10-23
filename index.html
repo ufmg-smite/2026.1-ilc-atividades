@@ -211,6 +211,8 @@
     .rp-typed p { margin:4px 0; } .rp-typed table { border-collapse:collapse; } .rp-typed td, .rp-typed th { border:1px solid #ddd; padding:2px 10px; text-align:center; }
     .rp-gab { background:#eef3f7; border-left:4px solid #3b6ea5; padding:10px 14px; margin-top:12px; font-size:14px; line-height:1.5; overflow-x:auto; }
     .rp-gab h3 { margin:0 0 4px; font-size:14.5px; color:#2c5580; } .rp-gab p { margin:4px 0; }
+    .rp-aten { background:#fbf3e6; border-left:4px solid #c8873a; padding:9px 14px; margin-top:8px; font-size:14px; line-height:1.5; }
+    .rp-aten > b { color:#8a5a1c; margin-right:4px; }
     .rp-gab .lei { color:#6b6b6b; font-size:12.5px; } .rp-gab img { max-width:100%; }
     .rp-gab .tree { text-align:center; } .rp-gab .tree img { width:100%; max-width:680px; }
     @media print {
@@ -236,7 +238,8 @@
       body.rp-printing .rp-gab { margin-top:2.5mm; padding:2mm 3mm; font-size:8.8pt; line-height:1.35; }
       body.rp-printing .rp-gab h3 { font-size:9.5pt; margin:0 0 1mm; } body.rp-printing .rp-gab p { margin:0.8mm 0; }
       body.rp-printing .rp-gab .tree img { max-width:150mm; }
-      body.rp-printing .rp-gab, body.rp-printing .rp-adj, body.rp-printing .rp-enc { break-inside:avoid; }
+      body.rp-printing .rp-aten { margin-top:1.5mm; padding:1.5mm 3mm; font-size:8.8pt; line-height:1.35; }
+      body.rp-printing .rp-gab, body.rp-printing .rp-adj, body.rp-printing .rp-enc, body.rp-printing .rp-aten { break-inside:avoid; }
     }
 </style>
 </head>
@@ -2107,6 +2110,16 @@
           // exams: HTML (with figures); activities: Markdown + LaTeX, like the statements
           body.innerHTML = quiz ? rich(q.gabaritoHtml) : window.DOMPurify ? DOMPurify.sanitize(q.gabaritoHtml) : "";
           g.appendChild(body); c.appendChild(g);
+          // activities: the "*Atenção:*" paragraph goes in its own block, below the gabarito
+          for (const par of [...body.querySelectorAll("p")]) {
+            const first = par.firstElementChild;
+            if (!first || first.tagName !== "EM" || first.textContent.trim() !== "Atenção:" || par.firstChild !== first) continue;
+            const a = el("div", "rp-aten"), lab = el("b", null, "Atenção:");
+            first.remove(); a.appendChild(lab);
+            if (par.firstChild && par.firstChild.nodeType === 3) par.firstChild.textContent = par.firstChild.textContent.replace(/^\s+/, "");
+            while (par.firstChild) a.appendChild(par.firstChild);
+            par.remove(); c.appendChild(a);
+          }
         }
         box.appendChild(c);
       }
