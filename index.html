@@ -2069,10 +2069,8 @@
         for (const k of q.criteria) {
           const tr = el("tr", k.met ? "" : "rp-miss");
           tr.appendChild(el("td", "rp-mark " + (k.met ? "rp-ok" : "rp-no"), k.met ? "✓" : "✗"));
-          // activities with skills: the question header says what is trained; the
-          // barème description stays only where the point was missed (what was expected)
           const td = el("td"); td.appendChild(el("div", "rp-lab", k.label));
-          if (k.detail && !(ex.summary && k.met)) td.appendChild(el("div", "rp-det", k.detail));
+          if (k.detail) td.appendChild(el("div", "rp-det", k.detail));
           tr.appendChild(td);
           tr.appendChild(el("td", "rp-pts", `${fmt(k.met ? k.pts : 0)} / ${fmt(k.pts)}`));
           ct.appendChild(tr);
