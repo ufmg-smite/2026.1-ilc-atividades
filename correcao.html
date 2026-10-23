@@ -491,6 +491,22 @@
     scheduleFit();
   }
 
+  // Score + state badge only: what changes when a criterion is ticked or the score
+  // is nudged (redrawing the scans/sidebar there was slow and reset zoom and edits).
+  function renderScore() {
+    const it = cur();
+    if (!it) return;
+    $("scoreVal").textContent = fmtScore(score);
+    $("scoreMax").textContent = "/ " + fmtScore(it.max || 0);
+    const b = $("stateBadge");
+    if (it.decision) {
+      b.className = "badge done";
+      b.textContent = `${it.decision.kind === "accept" ? "aceita" : "ajustada"} por ${it.decision.by.split("@")[0]}` +
+                      (it.decision.pending ? " (salvando…)" : "");
+    } else if (manual) { b.className = "badge man"; b.textContent = "nota manual"; }
+    else { b.className = "badge"; b.textContent = it.proposal ? "proposta do modelo" : "sem proposta"; }
+  }
+
   function render() {
     const it = cur();
     if (!it) {
@@ -504,15 +520,7 @@
     $("clusterInfo").textContent = sameCluster > 1
       ? `${sameCluster} alunos deram esta mesma resposta` : "";
 
-    $("scoreVal").textContent = fmtScore(score);
-    $("scoreMax").textContent = "/ " + fmtScore(it.max || 0);
-    const b = $("stateBadge");
-    if (it.decision) {
-      b.className = "badge done";
-      b.textContent = `${it.decision.kind === "accept" ? "aceita" : "ajustada"} por ${it.decision.by.split("@")[0]}`;
-    } else if (manual) { b.className = "badge man"; b.textContent = "nota manual"; }
-    else { b.className = "badge"; b.textContent = it.proposal ? "proposta do modelo" : "sem proposta"; }
-
+    renderScore();
     renderCriteria();
     $("transc").value = it.transcription || it.typedAnswer || "";
     renderScans();
@@ -565,13 +573,13 @@
     const max = cur() ? Number(cur().max || 0) : 0;
     score = round(Math.min(max, Math.max(0, score + d)));
     manual = true; dirty = true;
-    render();
+    renderScore();
   }
 
   function toggleCrit(key) {
     met[key] = !met[key];
     score = scoreFromCriteria(); manual = false; dirty = true;
-    render();
+    renderScore(); renderCriteria();
   }
 
   // ---------- committing ----------
@@ -587,22 +595,31 @@
     const criteria = {};
     for (const c of CRIT) criteria[c.key] = { met: !!met[c.key] };
 
-    say("salvando…");
-    const r = await api({
-      action: "commit", itemId: it.id, kind: untouched ? "accept" : "override",
-      score, justification, criteria,
-    });
-    if (!r.ok) { say(r.data.message || r.data.error || "Falha ao salvar.", "err"); return; }
-    it.decision = { score, justification, criteria, kind: untouched ? "accept" : "override",
-                    by: EMAIL, at: new Date().toISOString() };
+    // Optimistic: record the decision locally and move on at once; the save runs in
+    // the background. If it fails, the answer goes back to its previous state and
+    // the error names the student, so nothing is silently lost.
+    const kind = untouched ? "accept" : "override";
+    const prev = it.decision;
+    const dec = { score, justification, criteria, kind, by: EMAIL, at: new Date().toISOString(), pending: true };
+    it.decision = dec;
 
     // A repeated identical correction in a cluster becomes the cluster's new
     // default: the following unreviewed answers with the same content inherit
     // it, so an anomalous first item cannot poison the whole group.
     propagateInCluster(it);
 
-    say(untouched ? "aceita" : "ajustada", "ok");
     if (IDX < ITEMS.length - 1) go(1); else render();
+    api({ action: "commit", itemId: it.id, kind, score, justification, criteria })
+      .catch(() => ({ ok: false, data: { message: "sem conexão" } }))
+      .then((r) => {
+        if (it.decision !== dec) return;                     // superseded by a newer decision
+        if (r.ok) { delete dec.pending; renderScore(); return; }
+        it.decision = prev;
+        renderSidebar();
+        if (cur() === it) loadItemState();                   // show the reverted state
+        say(`Falha ao salvar a nota de ${it.studentName || it.studentKey}: ` +
+            `${r.data.message || r.data.error || "erro"} — a resposta voltou ao estado anterior.`, "err");
+      });
   }
 
   // Remove the grade from this answer — back to "pending", distinct from a 0.
