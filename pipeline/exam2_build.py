@@ -5,12 +5,13 @@ Inputs (dados/pipeline/exam2/, written by exam2_covers.py and checked by hand):
   pages.json     global reading order [(pdf, page)], 6 pages per booklet
   mapping.json   booklet → student (roster name, matrícula, turma, version)
 
-Each page is rendered at 150 dpi in grayscale and enhanced for faint handwriting:
-the paper is flattened to white (division by a blurred background estimate) and the
-ink is stretched with a gamma < 1, so thin strokes get darker without breaking.
-Two compressed copies are kept (resumable, one file per page in pages/):
-  g####.webp   1100 px wide, WebP q30     → the per-question images (grading page)
-  g####.jp2    JPEG 2000 at ~1/50 rate    → the single PDF
+Each page is rendered at 200 dpi (the scan resolution) in grayscale, with a MILD
+enhancement: the paper is flattened to white (division by a blurred background
+estimate) and the ink is stretched linearly (×1/0.7). No low cut-off and no gamma:
+both erased faint strokes or amplified the writing showing through from the back
+(rejected by the user). Two copies per page (resumable, in pages/):
+  g####.webp   1400 px wide, WebP q60   → the per-question images (grading page, as Prova 1)
+  g####.jpg    1400 px wide, JPEG q45   → the single PDF
 
 Outputs:
   items.json                one entry per (student, question), with its page images
@@ -29,13 +30,13 @@ W = os.path.join(ROOT, "dados", "pipeline", "exam2")
 PAGES = os.path.join(W, "pages")
 PDF_OUT = os.path.join(ROOT, "dados", "exams", "exam_2", "prova2_todas.pdf")
 QPAGES = {"q1": [0, 1], "q2": [2], "q3": [3], "q4": [4], "q5": [5]}
-WIDTH, WEBP_Q, JP2_RATE = 1100, 30, 50
+WIDTH, WEBP_Q, JPG_Q = 1400, 60, 45
 
 def enhance(im):
     a = np.asarray(im, dtype=float)
-    bg = np.asarray(im.filter(ImageFilter.MaxFilter(15)).filter(ImageFilter.GaussianBlur(20)), dtype=float) + 1
+    bg = np.asarray(im.filter(ImageFilter.MaxFilter(19)).filter(ImageFilter.GaussianBlur(25)), dtype=float) + 1
     ink = 1 - np.clip(a / bg, 0, 1)
-    e = 1 - np.clip((ink - 0.01) / (0.30 - 0.01), 0, 1) ** 0.6
+    e = 1 - np.clip(ink / 0.7, 0, 1)
     return Image.fromarray((e * 255).astype("uint8"))
 
 def slug(s):
@@ -47,15 +48,15 @@ def main():
     pages = json.load(open(os.path.join(W, "pages.json")))
     tmp = tempfile.mkdtemp()
     for g, (pdf, p) in enumerate(pages):
-        webp, jp2 = os.path.join(PAGES, f"g{g:04d}.webp"), os.path.join(PAGES, f"g{g:04d}.jp2")
-        if os.path.exists(webp) and os.path.exists(jp2):
+        webp, jpg = os.path.join(PAGES, f"g{g:04d}.webp"), os.path.join(PAGES, f"g{g:04d}.jpg")
+        if os.path.exists(webp) and os.path.exists(jpg):
             continue
         raw = os.path.join(tmp, "r")
-        subprocess.run(["pdftoppm", "-r", "150", "-gray", "-f", str(p), "-l", str(p), "-singlefile", pdf, raw], check=True)
+        subprocess.run(["pdftoppm", "-r", "200", "-gray", "-f", str(p), "-l", str(p), "-singlefile", pdf, raw], check=True)
         e = enhance(Image.open(raw + ".pgm"))
         e = e.resize((WIDTH, round(e.size[1] * WIDTH / e.size[0])), Image.LANCZOS)
         e.save(webp, quality=WEBP_Q, method=6)
-        e.save(jp2, quality_mode="rates", quality_layers=[JP2_RATE], irreversible=True)
+        e.save(jpg, quality=JPG_Q, optimize=True)
         if g % 60 == 0:
             print(f"page {g + 1}/{len(pages)}", flush=True)
 
@@ -74,7 +75,7 @@ def main():
     a4 = (img2pdf.mm_to_pt(210), img2pdf.mm_to_pt(297))
     raw_pdf = PDF_OUT + ".tmp"
     with open(raw_pdf, "wb") as f:
-        f.write(img2pdf.convert([os.path.join(PAGES, f"g{g:04d}.jp2") for g in range(len(pages))],
+        f.write(img2pdf.convert([os.path.join(PAGES, f"g{g:04d}.jpg") for g in range(len(pages))],
                                 layout_fun=img2pdf.get_layout_fun(a4)))
     r, w = pypdf.PdfReader(raw_pdf), pypdf.PdfWriter()
     w.append(r)
