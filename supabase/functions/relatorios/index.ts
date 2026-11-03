@@ -301,8 +301,11 @@ function mergeEx(lists: Ex[]): Ex {
   return [...by.entries()].sort((a, b) => a[0].localeCompare(b[0]))
     .map(([l, set]) => [l, [...set].sort((a, b) => a - b)] as [string, number[]]);
 }
-const C6_NAME = "Justificativas claras";
-const C6_TIP = "Comece dizendo o que vai demonstrar e justifique cada passo.";
+const C6_NAME = "Redação clara e justificativas";
+const C6_TIP = "Comece dizendo o que vai demonstrar, justifique cada passo e escreva fórmulas e frases com cuidado.";
+// presentation criteria: no skill of their own, they all go to the generic row above
+const CLARITY = new Set(["Justificativa clara", "Redação clara", "Notação correta", "Apresentação clara",
+  "Um passo por vez", "Lei em cada passo", "Definições claras", "Definições precisas", "Explicação clara"]);
 function skillTable(questions: any[], critRate: Record<string, Record<string, [number, number]>>) {
   type Sk = { id: string; nome: string; earned: number; possible: number; ex: Ex[]; order: number;
               cNum?: number; cDen?: number };
@@ -326,9 +329,12 @@ function skillTable(questions: any[], critRate: Record<string, Record<string, [n
       }
       cur.ex.push(sk.ex); skills.set(sk.id, cur);
     }
-    // "Justificativa clara" is c6 when a question has 5 other criteria, c5 when it has 4
-    const k6 = q.criteria.find((c: any) => c.label === "Justificativa clara") || byKey["c6"];
-    if (k6 && !q.missing) { c6.possible += k6.pts; if (k6.met) c6.earned += k6.pts; }
+    // the presentation criteria no skill claims ("Justificativa clara", "Redação clara", ...);
+    // older runs: c6 when nothing else matches
+    const mapped = new Set((fb.skills || []).flatMap((sk: any) => sk.crit));
+    const clar = q.criteria.filter((c: any) => CLARITY.has(c.label) && !mapped.has(c.key));
+    if (!clar.length && byKey["c6"] && !mapped.has("c6")) clar.push(byKey["c6"]);
+    if (!q.missing) for (const c of clar) { c6.possible += c.pts; if (c.met) c6.earned += c.pts; }
   }
   const all = [...skills.values(), ...(c6.possible ? [c6] : [])];
   const ratio = (s: Sk) => s.possible ? s.earned / s.possible : -1;
