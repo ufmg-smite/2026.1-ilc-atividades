@@ -17,6 +17,8 @@ Subcommands (run supabase/student_reports.sql first):
               real booklets; their codes are written to dados/relatorios/acesso/teste.csv.
   publish     set report_runs.published (--off to hide again). Staff can also do it from
               correcao.html ("Relatório"), which links students through student_emails.
+  feedback    report_questions.feedback (skills -> homework exercises, the report's skills table)
+              and titles, from dados/relatorios/quizzes/<run>/feedback.json; keeps the gabaritos.
   emails      student_emails (supabase/report_publish.sql): quiz e-mail -> matrícula, from the
               roster e-mails (codigos_relatorio.csv) and every quizzes/*/matricula_map.json.
   acessos     who opened their correction and when (report_access); --faltam lists who has not.
@@ -185,6 +187,19 @@ def cmd_emails(a):
     upsert("student_emails", rows, "email")
     print(f"student_emails: {len(rows)} e-mails upserted ({len(m) - len(rows)} skipped: matrícula without access code)")
 
+def cmd_feedback(a):
+    fb = json.load(open(os.path.join(DADOS, "relatorios", "quizzes", a.run, "feedback.json"), encoding="utf-8"))
+    pos = {q["question_id"]: q["position"] for q in
+           supa.get(f"correction_questions?run_id=eq.{a.run}&select=question_id,position")}
+    rows = []
+    for qid, q in fb["questions"].items():
+        f = {"skills": q["skills"]}
+        if q.get("alem"):
+            f["alem"] = q["alem"]
+        rows.append(dict(run_id=a.run, question_id=qid, numero=pos[qid] + 1, titulo=q["titulo"], feedback=f))
+    upsert("report_questions", rows, "run_id,question_id")
+    print(f"report_questions: {a.run} {len(rows)} questions (skills + titles; gabaritos untouched)")
+
 def cmd_publish(a):
     supa.patch(f"report_runs?run_id=eq.{a.run}", dict(published=not a.off))
     print(f"{a.run}: published = {not a.off}")
@@ -194,7 +209,7 @@ if __name__ == "__main__":
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("access")
     sub.add_parser("emails")
-    for name in ("run", "link", "test", "publish", "acessos"):
+    for name in ("run", "link", "test", "publish", "acessos", "feedback"):
         s = sub.add_parser(name)
         s.add_argument("--run", default="dcc638-prova1")
         if name == "run":
@@ -205,5 +220,5 @@ if __name__ == "__main__":
         if name == "acessos":
             s.add_argument("--faltam", action="store_true", help="also list who has not opened it yet")
     a = ap.parse_args()
-    {"access": cmd_access, "emails": cmd_emails, "run": cmd_run, "link": cmd_link, "test": cmd_test, "publish": cmd_publish,
+    {"access": cmd_access, "emails": cmd_emails, "feedback": cmd_feedback, "run": cmd_run, "link": cmd_link, "test": cmd_test, "publish": cmd_publish,
      "acessos": cmd_acessos}[a.cmd](a)

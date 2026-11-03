@@ -1975,7 +1975,8 @@
     }
 
     // Homework lists on Moodle: "06" -> "Lista 06 (Conjuntos)"
-    const LISTAS = { "05": "Métodos de Demonstração", "06": "Conjuntos", "07": "Funções",
+    const LISTAS = { "02": "Lógica Proposicional", "03": "Lógica de Predicados", "04": "Dedução Natural",
+                     "05": "Métodos de Demonstração", "06": "Conjuntos", "07": "Funções",
                      "08": "Cardinalidade", "09": "Indução" };
     const joinE = (xs) => xs.length < 2 ? xs.join("") : xs.slice(0, -1).join(", ") + " e " + xs[xs.length - 1];
     const fmtEx = (ex) => (ex || []).map(([l, ns]) =>
