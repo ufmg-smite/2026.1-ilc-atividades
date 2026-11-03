@@ -42,7 +42,7 @@
     .srow .nm { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .srow .sc { font-variant-numeric: tabular-nums; color:#5f6368; }
     .srow.done .sc { color:#188038; font-weight:600; }
-    .srow.clus { border-left:3px solid #fbbc04; }
+    .srow .gr { font-size:10.5px; color:#5f6368; margin-left:4px; }
 
     #scans { flex:1.15; min-width:0; background:#3c4043; overflow:hidden; position:relative;
              display:flex; flex-direction:column; padding:10px; }
@@ -181,12 +181,13 @@
     <select id="runSel" onchange="onRunChange()"></select>
     <select id="qSel" onchange="loadQueue()"></select>
     <select id="orderSel" class="deskOnly" onchange="loadQueue()" title="Ordem da fila">
-      <option value="alpha" selected>ordem alfabética</option>
-      <option value="default">agrupado por resposta</option>
+      <option value="random" selected>ordem aleatória</option>
+      <option value="alpha">ordem alfabética</option>
     </select>
     <span class="prog" id="prog"></span>
     <span class="spacer"></span>
     <button class="ghost" onclick="openRubric()" title="b">Barema</button>
+    <button class="ghost" onclick="openReport()" title="relatório dos alunos">Relatório</button>
     <button class="ghost deskOnly" onclick="exportCsv()">CSV</button>
     <button class="ghost deskOnly" onclick="openHelp()" title="?">Teclas</button>
     <span class="who deskOnly" id="who"></span>
@@ -212,7 +213,6 @@
     <div class="sect">
       <label>Aluno</label>
       <div id="student" style="font-size:15px;font-weight:500"></div>
-      <div class="hint" id="clusterInfo"></div>
     </div>
 
     <div class="sect">
@@ -289,6 +289,18 @@
       <button class="green" onclick="saveRubric()">Salvar barema</button>
     </div>
     <div id="rubMsg" style="font-size:12.5px;margin-top:8px"></div>
+  </div>
+</div>
+
+<!-- ===== student report: publish / hide ===== -->
+<div class="overlay hidden" id="reportOv" onclick="closeReport()">
+  <div class="modal" style="max-width:620px" onclick="event.stopPropagation()">
+    <h2>Relatório dos alunos — <span id="repRun"></span></h2>
+    <p class="hint">Publicado, cada aluno vê na página "Minhas correções" a nota de cada questão,
+      os critérios marcados, a justificativa e a foto da sua resposta. Ocultar tira o relatório do ar
+      na hora; nada é apagado.</p>
+    <div id="repBody" style="font-size:13.5px;margin-top:10px">carregando…</div>
+    <div id="repMsg" style="font-size:12.5px;margin-top:8px"></div>
   </div>
 </div>
 
@@ -418,6 +430,9 @@
   let score = 0, met = {}, manual = false, dirty = false;
   let rot = 0, scale = 1, panX = 0, panY = 0;
   let SCAN_MODE = "image";   // "image" = scan, "text" = rendered transcription
+  let GRADERS = {};          // e-mail -> staff name (who graded what)
+  const graderName = (e) => GRADERS[String(e || "").toLowerCase()] || String(e || "").split("@")[0];
+  const initials = (n) => String(n || "").split(/\s+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 3).toUpperCase();
   let signedAt = 0;   // signed URLs last 15 min; refresh before they lapse
 
   const round = (n) => Math.round(n * 100) / 100;
@@ -437,10 +452,11 @@
     $("sidebar").innerHTML = ITEMS.map((it, i) => {
       const s = it.decision ? fmtScore(it.decision.score)
                             : (it.proposal ? fmtScore(it.proposal.score) : "—");
-      const clus = i > 0 && it.clusterKey && it.clusterKey === ITEMS[i - 1].clusterKey;
-      return `<div class="srow ${i === IDX ? "cur" : ""} ${it.decision ? "done" : ""} ${clus ? "clus" : ""}"
+      const gr = it.decision ? `<span class="gr" title="${escapeHtml(graderName(it.decision.by))}">` +
+                               `${escapeHtml(initials(graderName(it.decision.by)))}</span>` : "";
+      return `<div class="srow ${i === IDX ? "cur" : ""} ${it.decision ? "done" : ""}"
                    data-i="${i}"><span class="nm">${escapeHtml(it.studentName || it.studentKey)}</span>
-              <span class="sc">${s}</span></div>`;
+              <span class="sc">${s}${gr}</span></div>`;
     }).join("");
     const el = $("sidebar").querySelector(".srow.cur");
     if (el) el.scrollIntoView({ block: "nearest" });
@@ -502,7 +518,7 @@
     const b = $("stateBadge");
     if (it.decision) {
       b.className = "badge done";
-      b.textContent = `${it.decision.kind === "accept" ? "aceita" : "ajustada"} por ${it.decision.by.split("@")[0]}` +
+      b.textContent = `${it.decision.kind === "accept" ? "aceita" : "ajustada"} por ${graderName(it.decision.by)}` +
                       (it.decision.pending ? " (salvando…)" : "");
     } else if (manual) { b.className = "badge man"; b.textContent = "nota manual"; }
     else { b.className = "badge"; b.textContent = it.proposal ? "proposta do modelo" : "sem proposta"; }
@@ -516,10 +532,6 @@
       return;
     }
     $("student").textContent = it.studentName || it.studentKey;
-
-    const sameCluster = ITEMS.filter((x) => it.clusterKey && x.clusterKey === it.clusterKey).length;
-    $("clusterInfo").textContent = sameCluster > 1
-      ? `${sameCluster} alunos deram esta mesma resposta` : "";
 
     renderScore();
     renderCriteria();
@@ -551,10 +563,7 @@
       $("justif").value = it.decision.justification || "";
     } else if (it.proposal) {
       for (const c of CRIT) met[c.key] = it.proposal.criteria?.[c.key]?.met === true;
-      // A score inherited from the cluster wins over the model's own: it is the
-      // one a person already applied twice to this same answer.
-      score = it.clusterScore != null ? it.clusterScore : scoreFromCriteria();
-      manual = it.clusterScore != null;
+      score = scoreFromCriteria();
       $("justif").value = it.proposal.justification || "";
     } else {
       score = 0; $("justif").value = "";
@@ -607,17 +616,22 @@
     const dec = { score: finalScore, justification, criteria, kind, by: EMAIL, at: new Date().toISOString(), pending: true };
     it.decision = dec;
 
-    // A repeated identical correction in a cluster becomes the cluster's new
-    // default: the following unreviewed answers with the same content inherit
-    // it, so an anomalous first item cannot poison the whole group.
-    propagateInCluster(it);
-
     if (IDX < ITEMS.length - 1) go(1); else render();
-    api({ action: "commit", itemId: it.id, kind, score: finalScore, justification, criteria })
+    // `seen`: the decision this grader was looking at (null = pending). The server
+    // refuses to replace a grade someone else gave in the meantime.
+    api({ action: "commit", itemId: it.id, kind, score: finalScore, justification, criteria,
+          seen: prev ? prev.at : null })
       .catch(() => ({ ok: false, data: { message: "sem conexão" } }))
       .then((r) => {
         if (it.decision !== dec) return;                     // superseded by a newer decision
         if (r.ok) { delete dec.pending; renderScore(); return; }
+        if (r.data && r.data.error === "conflict") {         // another grader got there first
+          it.decision = r.data.decision;
+          renderSidebar();
+          if (cur() === it) loadItemState();
+          say(`${it.studentName || it.studentKey}: ${r.data.message}`, "err");
+          return;
+        }
         it.decision = prev;
         renderSidebar();
         if (cur() === it) loadItemState();                   // show the reverted state
@@ -639,23 +653,6 @@
     loadItemState();   // back to pending (proposal/blank), re-rendered
     say("nota removida — resposta reaberta (histórico mantido)", "ok");
   };
-
-  function propagateInCluster(src) {
-    if (!src.clusterKey) return;
-    const peers = ITEMS.filter((x) => x.clusterKey === src.clusterKey && x.decision);
-    if (peers.length < 2) return;
-    const last = peers.slice(-2);
-    if (round(last[0].decision.score) !== round(last[1].decision.score)) return;
-    const s = round(last[0].decision.score);
-    let n = 0;
-    for (const x of ITEMS) {
-      if (x.clusterKey === src.clusterKey && !x.decision && round(x.clusterScore ?? NaN) !== s) {
-        x.clusterScore = s;                   // read back by loadItemState()
-        n++;
-      }
-    }
-    if (n) say(`nota ${fmtScore(s)} virou o padrão deste grupo (${n} respostas)`, "ok");
-  }
 
   async function regrade() {
     const it = cur();
@@ -690,9 +687,15 @@
     const r = await api({ action: "queue", runId: RUN, questionId: QID, order: $("orderSel").value });
     if (!r.ok) { say(r.data.message || r.data.error || "Falha ao carregar a fila.", "err"); return; }
     QUESTION = r.data.question; CRIT = r.data.criteria || []; ITEMS = r.data.items || [];
-    // Alphabetical is also applied client-side so it works even before the
-    // correction function is redeployed (the server does the same sort).
-    if ($("orderSel").value === "alpha") {
+    GRADERS = r.data.graders || {};
+    // Random order (default) avoids grading biases (alphabetical neighbours, the
+    // last answers of a tired session...). It is a fixed shuffle per grader and
+    // question: the same after a reload, different between graders, so people
+    // working on the same question at once rarely meet.
+    if ($("orderSel").value === "random") {
+      ITEMS.sort((a, b) => a.studentName < b.studentName ? -1 : 1);   // stable base
+      seededShuffle(ITEMS, `${EMAIL}|${RUN}|${QID}`);
+    } else {
       ITEMS.sort((a, b) =>
         (a.studentName || a.studentEmail || "").localeCompare(
           b.studentName || b.studentEmail || "", "pt-BR", { sensitivity: "base" }));
@@ -702,6 +705,78 @@
     if (IDX < 0) IDX = 0;
     loadItemState();
     say(ITEMS.length ? "" : "Nenhuma resposta importada para esta questão.");
+  };
+
+  function seededShuffle(arr, seed) {             // Fisher–Yates with a string-seeded PRNG
+    let h = 2166136261;
+    for (let i = 0; i < seed.length; i++) h = Math.imul(h ^ seed.charCodeAt(i), 16777619);
+    const rnd = () => { h += 0x6D2B79F5; let t = h; t = Math.imul(t ^ (t >>> 15), t | 1);
+                        t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; }
+  }
+
+  // ---------- student report: publish / hide ----------
+  window.openReport = async function () {
+    if (!RUN) return;
+    $("reportOv").classList.remove("hidden");
+    $("repRun").textContent = $("runSel").selectedOptions[0]?.textContent || RUN;
+    $("repMsg").textContent = "";
+    await loadReport();
+  };
+  window.closeReport = function () { $("reportOv").classList.add("hidden"); };
+
+  async function loadReport() {
+    $("repBody").textContent = "carregando…";
+    const r = await api({ action: "reportStatus", runId: RUN });
+    if (!r.ok) { $("repBody").innerHTML = `<span class="err">${escapeHtml(r.data.message || r.data.error || "Falha.")}</span>`; return; }
+    const d = r.data, rep = d.report;
+    const when = rep && rep.at ? new Date(rep.at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "";
+    const state = !rep ? "ainda não criado (nunca publicado)"
+      : rep.published ? `<b class="ok">publicado</b>${rep.by ? ` por ${escapeHtml(rep.by)}` : ""}${when ? ` em ${when}` : ""}`
+      : `<b>oculto</b>${rep.by ? ` (última mudança: ${escapeHtml(rep.by)}${when ? `, ${when}` : ""})` : ""}`;
+    const pend = d.items - d.graded;
+    const unl = d.unlinked.map((u) => `<tr><td>${escapeHtml(u.name)}<br><span class="hint">${escapeHtml(u.email)}</span></td>
+        <td style="width:150px"><input placeholder="matrícula" data-email="${escapeHtml(u.email)}"></td>
+        <td style="width:70px"><button class="ghost" onclick="linkStudent(this)">vincular</button></td></tr>`).join("");
+    $("repBody").innerHTML = `
+      <p>Estado: ${state}</p>
+      <p>Correção: <b>${d.graded}</b> de ${d.items} respostas corrigidas${pend ? ` — <span class="err">${pend} pendentes</span>
+         (o aluno vê "—" nessas questões e fica sem nota final até tudo estar corrigido)` : " ✓"}.</p>
+      <p>Alunos: ${d.linked} de ${d.students} vinculados à matrícula (sem vínculo, o aluno não vê este relatório).</p>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;max-width:430px;margin:12px 0">
+        <label>Título</label><input id="repTitle" value="${escapeHtml(rep ? rep.title : d.defaults.title)}">
+        <label>Nota base</label><input id="repBase" type="number" min="1" step="0.5" value="${rep ? rep.notaBase : d.defaults.notaBase}">
+      </div>
+      <p class="hint">Nota exibida = pontos ÷ nota base × 100 (limitada a 100). Padrão: soma dos pontos de todas as questões.
+        Gabarito e exercícios recomendados são opcionais e preparados à parte; sem eles o relatório mostra
+        nota, critérios e a resposta do aluno.</p>
+      <div style="display:flex;gap:8px;margin:12px 0">
+        ${rep && rep.published
+          ? `<button class="grey" onclick="publishReport(false)">Ocultar dos alunos</button>
+             <button class="ghost" onclick="publishReport(true)">Salvar título / nota base</button>`
+          : `<button class="green" onclick="publishReport(true)">Publicar para os alunos</button>`}
+      </div>
+      ${d.unlinked.length ? `<p style="margin-top:14px"><b>${d.unlinked.length} aluno(s) sem matrícula conhecida</b>
+        <span class="hint">(e-mail usado nas atividades diferente do cadastro; informe a matrícula uma vez, vale para todas as atividades)</span></p>
+        <table>${unl}</table>` : ""}`;
+  }
+
+  window.publishReport = async function (published) {
+    if (published && !confirm("Publicar este relatório para os alunos?")) return;
+    $("repMsg").textContent = "salvando…"; $("repMsg").className = "";
+    const r = await api({ action: "publishReport", runId: RUN, published,
+                          title: $("repTitle").value.trim(), notaBase: Number($("repBase").value) });
+    if (!r.ok) { $("repMsg").textContent = r.data.message || r.data.detail || r.data.error || "Falha."; $("repMsg").className = "err"; return; }
+    await loadReport();
+    $("repMsg").textContent = published ? "Relatório publicado." : "Relatório oculto."; $("repMsg").className = "ok";
+  };
+
+  window.linkStudent = async function (btn) {
+    const inp = btn.closest("tr").querySelector("input");
+    const r = await api({ action: "linkStudent", email: inp.dataset.email, matricula: inp.value });
+    if (!r.ok) { $("repMsg").textContent = r.data.message || r.data.error || "Falha."; $("repMsg").className = "err"; return; }
+    await loadReport();
+    $("repMsg").textContent = `Vinculado a ${r.data.nome}.`; $("repMsg").className = "ok";
   };
 
   // Signed URLs expire after 15 minutes; refresh them quietly, keeping position.
@@ -973,6 +1048,10 @@
     if (!$("helpOv").classList.contains("hidden")) {
       if (e.key === "Escape" || e.key === "?") closeHelp();
       return;
+    }
+    if (!$("reportOv").classList.contains("hidden")) {
+      if (e.key === "Escape") closeReport();
+      return;                                    // report dialog owns the keyboard
     }
 
     if (inField(e)) {

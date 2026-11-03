@@ -15,7 +15,10 @@ Subcommands (run supabase/student_reports.sql first):
               from the human-verified name mapping (dados/attendence_list/notas_prova1.csv).
   test        two staff test accounts (preview: they see unpublished runs), linked to two
               real booklets; their codes are written to dados/relatorios/acesso/teste.csv.
-  publish     set report_runs.published (--off to hide again).
+  publish     set report_runs.published (--off to hide again). Staff can also do it from
+              correcao.html ("Relatório"), which links students through student_emails.
+  emails      student_emails (supabase/report_publish.sql): quiz e-mail -> matrícula, from the
+              roster e-mails (codigos_relatorio.csv) and every quizzes/*/matricula_map.json.
   acessos     who opened their correction and when (report_access); --faltam lists who has not.
 
     /home/dap/miniconda3/bin/python3 setup_reports.py access
@@ -163,6 +166,25 @@ def cmd_acessos(a):
             if not o["acessos"]:
                 print(f"  not yet: {o['nome']} ({o['matricula']}, {o['turma']}) {o['email']}")
 
+def cmd_emails(a):
+    import glob
+    m = {}
+    for r in csv.DictReader(open(ACCESS_CSV, encoding="utf-8")):
+        if r.get("email"):
+            m[r["email"].strip().lower()] = re.sub(r"\D", "", r["matricula"])
+    # matricula_map.json per quiz (checked by hand) + acesso/emails_por_nome.json (quiz e-mails whose
+    # student name matches exactly one roster name, accents/case ignored)
+    for f in sorted(glob.glob(os.path.join(DADOS, "relatorios", "quizzes", "*", "matricula_map.json"))) + \
+             [os.path.join(DADOS, "relatorios", "acesso", "emails_por_nome.json")]:
+        if not os.path.exists(f):
+            continue
+        for e, mat in json.load(open(f, encoding="utf-8")).items():
+            m[e.strip().lower()] = re.sub(r"\D", "", mat)
+    known = {r["matricula"] for r in supa.get("student_access?select=matricula&limit=5000")}
+    rows = [dict(email=e, matricula=mat) for e, mat in sorted(m.items()) if mat in known]
+    upsert("student_emails", rows, "email")
+    print(f"student_emails: {len(rows)} e-mails upserted ({len(m) - len(rows)} skipped: matrícula without access code)")
+
 def cmd_publish(a):
     supa.patch(f"report_runs?run_id=eq.{a.run}", dict(published=not a.off))
     print(f"{a.run}: published = {not a.off}")
@@ -171,6 +193,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("access")
+    sub.add_parser("emails")
     for name in ("run", "link", "test", "publish", "acessos"):
         s = sub.add_parser(name)
         s.add_argument("--run", default="dcc638-prova1")
@@ -182,5 +205,5 @@ if __name__ == "__main__":
         if name == "acessos":
             s.add_argument("--faltam", action="store_true", help="also list who has not opened it yet")
     a = ap.parse_args()
-    {"access": cmd_access, "run": cmd_run, "link": cmd_link, "test": cmd_test, "publish": cmd_publish,
+    {"access": cmd_access, "emails": cmd_emails, "run": cmd_run, "link": cmd_link, "test": cmd_test, "publish": cmd_publish,
      "acessos": cmd_acessos}[a.cmd](a)

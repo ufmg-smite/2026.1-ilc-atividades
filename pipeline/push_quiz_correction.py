@@ -36,7 +36,8 @@ def main():
     when = datetime.fromisoformat(quiz["opened_at"]).strftime("%d/%m") if quiz.get("opened_at") else ""
     num = a.quiz.rsplit("atividade", 1)[-1]
     supa.post("correction_runs?on_conflict=id",
-              [dict(id=a.quiz, title=f"Atividade {num} ({when})", source=a.quiz)],
+              [dict(id=a.quiz, title=f"Atividade {num} ({when})", source=a.quiz,
+                    **({"created_at": quiz["opened_at"]} if quiz.get("opened_at") else {}))],   # correcao.html lists newest first
               prefer="resolution=merge-duplicates,return=minimal")
     qs = quiz["questions"]
     supa.post("correction_questions?on_conflict=run_id,question_id",

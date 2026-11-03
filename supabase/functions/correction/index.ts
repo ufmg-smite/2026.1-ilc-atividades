@@ -20,6 +20,9 @@
 //    { action:"commit",         itemId, score, justification, criteria, kind }
 //    { action:"regrade",        itemId, transcription? }
 //    { action:"exportRows",     runId }
+//    { action:"reportStatus",   runId }        student report: state, links, progress
+//    { action:"publishReport",  runId, published, title?, notaBase? }
+//    { action:"linkStudent",    email, matricula }   quiz e-mail -> matrícula (reports)
 //
 //  THE ONE RULE THAT SHAPES EVERYTHING: the grading model never emits a score.
 //  It reports which barème criteria an answer satisfies; points live in the
@@ -72,6 +75,16 @@ async function rows(path: string): Promise<any[]> {
   const res = await db(path);
   if (!res.ok) return [];
   return (await res.json().catch(() => [])) as any[];
+}
+
+// PostgREST caps a response at 1000 rows: page through bigger reads.
+async function rowsAll(path: string): Promise<any[]> {
+  const out: any[] = [];
+  for (let off = 0; ; off += 1000) {
+    const r = await rows(`${path}&limit=1000&offset=${off}`);
+    out.push(...r);
+    if (r.length < 1000) return out;
+  }
 }
 
 // ---------- staff auth (identical model to the quiz function) ----------
@@ -594,7 +607,9 @@ Deno.serve(async (req) => {
         (a.studentName || a.studentEmail || "").localeCompare(
           b.studentName || b.studentEmail || "", "pt-BR", { sensitivity: "base" }));
     }
-    return json({ ok: true, question: q, criteria: defs, items: out }, 200);
+    const graders: Record<string, string> = {};
+    for (const st of await rows(`staff?select=email,name`)) graders[String(st.email).toLowerCase()] = st.name || "";
+    return json({ ok: true, question: q, criteria: defs, items: out, graders }, 200);
   }
 
   // ---------------- decisions (append-only) ----------------
@@ -613,6 +628,25 @@ Deno.serve(async (req) => {
     );
     const rubric: Record<string, number> = {};
     for (const d of defs) rubric[d.key] = Number(d.points) || 0;
+
+    // Several graders work on the same question at once: a grade is never
+    // silently replaced. If someone else graded this answer after this grader
+    // loaded it (p.seen = the decision time the page showed, null if pending),
+    // the new grade is refused and the current one is returned.
+    if (kind !== "reopen") {
+      const evs = await rows(`correction_events?item_id=eq.${itemId}&kind=in.(accept,override,reopen)` +
+                             `&select=kind,score,justification,criteria,actor_email,created_at&order=created_at.asc`);
+      let curDec: any = null;
+      for (const e of evs) curDec = e.kind === "reopen" ? null : e;
+      if (curDec && curDec.actor_email !== who.email && curDec.created_at !== (p.seen ?? null)) {
+        const nm = (await rows(`staff?email=eq.${enc(curDec.actor_email)}&select=name`))[0]?.name || curDec.actor_email;
+        return json({
+          error: "conflict", message: `${nm} já corrigiu esta resposta (nota ${curDec.score}); a sua nota não foi salva.`,
+          decision: { score: Number(curDec.score), justification: curDec.justification, criteria: curDec.criteria,
+                      kind: curDec.kind, by: curDec.actor_email, at: curDec.created_at },
+        }, 409);
+      }
+    }
 
     const res = await db(`correction_events`, {
       method: "POST", headers: { Prefer: "return=minimal" },
@@ -692,6 +726,104 @@ Deno.serve(async (req) => {
     return json({
       ok: true, run, questions: qs.map((q: any) => q.question_id), rows: cur,
     }, 200);
+  }
+
+  // ---------------- student reports ("Minhas correções") ----------------
+  // Any staff member may publish or hide a run's report. Publishing creates the
+  // report_runs row if needed (title + nota_base default from the run) and links
+  // every answer's e-mail to a matrícula through student_emails; questions with no
+  // report_questions row fall back to the quiz statement's heading for the title.
+  // Tables: supabase/student_reports.sql + supabase/report_publish.sql.
+  if (action === "reportStatus" || action === "publishReport") {
+    const runId = String(p.runId || "");
+    const run = (await rows(`correction_runs?id=eq.${enc(runId)}&select=id,title`))[0];
+    if (!run) return json({ error: "Correção não encontrada" }, 404);
+    const items = await rowsAll(`correction_items?run_id=eq.${enc(runId)}&select=id,student_key,student_name&order=id`);
+    const crit = await rows(`correction_criteria?run_id=eq.${enc(runId)}&active=eq.true&select=question_id,points`);
+    const maxTotal = crit.reduce((s: number, c: any) => s + (Number(c.points) || 0), 0);
+    const students: Record<string, string> = {};
+    for (const it of items) students[it.student_key] = it.student_name || it.student_key;
+    const keys = Object.keys(students);
+    const map: Record<string, string> = {};
+    for (let i = 0; i < keys.length; i += 100) {
+      for (const r of await rows(`student_emails?email=in.${enc("(" + keys.slice(i, i + 100).map((k) => `"${k}"`).join(",") + ")")}&select=email,matricula`)) {
+        map[r.email] = r.matricula;
+      }
+    }
+
+    if (action === "publishReport") {
+      const published = p.published === true;
+      const existing = (await rows(`report_runs?run_id=eq.${enc(runId)}&select=run_id`))[0];
+      const body: any = { run_id: runId, published, published_by: who.email, published_at: new Date().toISOString() };
+      if (!existing || p.title) body.title = String(p.title || run.title).slice(0, 200);
+      if (!existing || p.notaBase !== undefined) {
+        const nb = Number(p.notaBase ?? maxTotal);
+        if (!(nb > 0)) return json({ error: "Nota base inválida" }, 400);
+        body.nota_base = nb;
+      }
+      const res = await db(`report_runs?on_conflict=run_id`, {
+        method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) return json({ error: "Falha ao salvar", detail: (await res.text()).slice(0, 200) }, 500);
+      const links = keys.filter((k) => map[k]).map((k) => ({ run_id: runId, matricula: map[k], student_key: k }));
+      if (links.length) {
+        const r2 = await db(`report_students?on_conflict=run_id,matricula`, {
+          method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+          body: JSON.stringify(links),
+        });
+        if (!r2.ok) return json({ error: "Falha ao vincular alunos", detail: (await r2.text()).slice(0, 200) }, 500);
+      }
+    }
+
+    const rr = (await rows(`report_runs?run_id=eq.${enc(runId)}&select=*`))[0] || null;
+    const linked = new Set((await rows(`report_students?run_id=eq.${enc(runId)}&select=student_key&limit=5000`))
+      .map((r: any) => r.student_key));
+    // graded = items with a current human decision
+    const evs = await rowsAll(`correction_events?select=item_id,kind,correction_items!inner(run_id)` +
+                              `&correction_items.run_id=eq.${enc(runId)}&kind=in.(accept,override,reopen)&order=created_at.asc`);
+    const dec: Record<string, boolean> = {};
+    for (const e of evs) dec[e.item_id] = e.kind !== "reopen";
+    const graded = Object.values(dec).filter(Boolean).length;
+    const pubName = rr?.published_by
+      ? ((await rows(`staff?email=eq.${enc(rr.published_by)}&select=name`))[0]?.name || rr.published_by) : "";
+    return json({
+      ok: true,
+      report: rr ? { title: rr.title, notaBase: Number(rr.nota_base), published: !!rr.published,
+                     by: pubName, at: rr.published_at || null } : null,
+      defaults: { title: run.title, notaBase: maxTotal },
+      items: items.length, graded, students: keys.length,
+      linked: keys.filter((k) => linked.has(k) || map[k]).length,   // linked now or at the next publish
+      unlinked: keys.filter((k) => !linked.has(k) && !map[k])
+        .map((k) => ({ email: k, name: students[k] }))
+        .sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
+    }, 200);
+  }
+
+  // A quiz e-mail the roster does not know (personal Gmail, typo...): staff give the
+  // matrícula once; it is checked against student_access and reused by every report.
+  if (action === "linkStudent") {
+    const email = String(p.email || "").toLowerCase().trim();
+    const mat = String(p.matricula || "").replace(/\D/g, "");
+    if (!email || !mat) return json({ error: "E-mail e matrícula obrigatórios" }, 400);
+    const acc = (await rows(`student_access?matricula=eq.${enc(mat)}&select=nome`))[0];
+    if (!acc) return json({ error: "Matrícula desconhecida (não está na lista de acesso)." }, 404);
+    const res = await db(`student_emails?on_conflict=email`, {
+      method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({ email, matricula: mat }),
+    });
+    if (!res.ok) return json({ error: "Falha ao salvar", detail: (await res.text()).slice(0, 200) }, 500);
+    // link it in every report already created for a run this e-mail answered
+    const runs = new Set((await rows(`correction_items?student_key=eq.${enc(email)}&select=run_id`)).map((r: any) => r.run_id));
+    const have = new Set((await rows(`report_runs?select=run_id`)).map((r: any) => r.run_id));
+    const links = [...runs].filter((r) => have.has(r)).map((r) => ({ run_id: r, matricula: mat, student_key: email }));
+    if (links.length) {
+      await db(`report_students?on_conflict=run_id,matricula`, {
+        method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify(links),
+      });
+    }
+    return json({ ok: true, nome: acc.nome }, 200);
   }
 
   return json({ error: "Ação desconhecida" }, 400);
