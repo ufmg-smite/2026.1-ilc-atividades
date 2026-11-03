@@ -695,6 +695,9 @@
     if ($("orderSel").value === "random") {
       ITEMS.sort((a, b) => a.studentName < b.studentName ? -1 : 1);   // stable base
       seededShuffle(ITEMS, `${EMAIL}|${RUN}|${QID}`);
+      // graded answers on top (by anyone), the pending ones below: the grader
+      // starts on the first pending answer and never scrolls past done work
+      ITEMS = [...ITEMS.filter((i) => i.decision), ...ITEMS.filter((i) => !i.decision)];
     } else {
       ITEMS.sort((a, b) =>
         (a.studentName || a.studentEmail || "").localeCompare(
