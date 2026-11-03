@@ -1974,13 +1974,15 @@
       showView(true);
     }
 
-    // Homework lists on Moodle: "06" -> "Lista 06 (Conjuntos)"
-    const LISTAS = { "02": "Lógica Proposicional", "03": "Lógica de Predicados", "04": "Dedução Natural",
+    // Homework lists on Moodle: "06" -> "Lista 06 (Conjuntos)"; "DN" = the unnumbered
+    // natural-deduction list
+    const LISTAS = { "01": "Lógica Proposicional", "02": "Lógica de Predicados",
                      "05": "Métodos de Demonstração", "06": "Conjuntos", "07": "Funções",
                      "08": "Cardinalidade", "09": "Indução" };
     const joinE = (xs) => xs.length < 2 ? xs.join("") : xs.slice(0, -1).join(", ") + " e " + xs[xs.length - 1];
     const fmtEx = (ex) => (ex || []).map(([l, ns]) =>
-      `Lista ${l}${LISTAS[l] ? " (" + LISTAS[l] + ")" : ""}, ex. ${joinE(ns.map(String))}`).join(" · ");
+      `${l === "DN" ? "Lista de Dedução Natural" : `Lista ${l}${LISTAS[l] ? " (" + LISTAS[l] + ")" : ""}`}` +
+      `, ex. ${joinE(ns.map(String))}`).join(" · ");
 
     // Activities: every skill with the student's points on it and the homework
     // exercises that train it (computed by the function from the teacher-checked table).
