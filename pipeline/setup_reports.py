@@ -18,7 +18,8 @@ Subcommands (run supabase/student_reports.sql first):
   publish     set report_runs.published (--off to hide again). Staff can also do it from
               correcao.html ("Relatório"), which links students through student_emails.
   feedback    report_questions.feedback (skills -> homework exercises, the report's skills table)
-              and titles, from dados/relatorios/quizzes/<run>/feedback.json; keeps the gabaritos.
+              and titles, from dados/relatorios/quizzes/<run>/feedback.json, plus the gabaritos from
+              dados/relatorios/gabaritos/<run>.json when it exists (else they are left untouched).
   emails      student_emails (supabase/report_publish.sql): quiz e-mail -> matrícula, from the
               roster e-mails (codigos_relatorio.csv) and every quizzes/*/matricula_map.json.
   acessos     who opened their correction and when (report_access); --faltam lists who has not.
@@ -197,8 +198,17 @@ def cmd_feedback(a):
         if q.get("alem"):
             f["alem"] = q["alem"]
         rows.append(dict(run_id=a.run, question_id=qid, numero=pos[qid] + 1, titulo=q["titulo"], feedback=f))
+    # gabaritos (Markdown + LaTeX) when dados/relatorios/gabaritos/<run>.json exists
+    gpath = os.path.join(DADOS, "relatorios", "gabaritos", f"{a.run}.json")
+    gab = json.load(open(gpath, encoding="utf-8")) if os.path.exists(gpath) else {}
+    for r in rows:
+        if gab.get(r["question_id"]):
+            r["gabarito_html"] = gab[r["question_id"]]
+    if gab and not all("gabarito_html" in r for r in rows):
+        raise SystemExit(f"{gpath}: no gabarito for {[r['question_id'] for r in rows if 'gabarito_html' not in r]}")
     upsert("report_questions", rows, "run_id,question_id")
-    print(f"report_questions: {a.run} {len(rows)} questions (skills + titles; gabaritos untouched)")
+    print(f"report_questions: {a.run} {len(rows)} questions (skills + titles"
+          f"{' + gabaritos' if gab else '; gabaritos untouched'})")
 
 def cmd_publish(a):
     supa.patch(f"report_runs?run_id=eq.{a.run}", dict(published=not a.off))
