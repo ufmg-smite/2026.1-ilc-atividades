@@ -511,6 +511,13 @@
       });
     }
 
+    // No text and no sent photo. Automatic sends (window close, quiz close, app
+    // backgrounded) never transmit such an answer: the latest version wins, so it
+    // would erase what is already saved, possibly from another tab or device.
+    function isEmptyAnswer(answer, imageIds) {
+      return !String(answer || "").trim() && !(imageIds && imageIds.length);
+    }
+
     function markDirty(qid) {
       state[qid].dirty = true;
       if (!LOCKED) { state[qid].st.textContent = "Alterações não enviadas"; state[qid].st.className = "save-state dirty"; }
@@ -898,6 +905,11 @@
     async function submitOne(qid, st, btn) {
       if (LOCKED || (state[qid] && state[qid].locked)) return;
       const s = state[qid], ta = s.el;
+      // automatic send (btn = null) with no text and no photo at all: nothing to send
+      if (!btn && !ta.value.trim() && !s.photos.length) return;
+      if (btn && !ta.value.trim() && !s.photos.length &&
+          !confirm("Esta resposta está vazia. Enviá-la apaga a resposta já enviada para esta questão " +
+                   "(inclusive de outro aparelho). Enviar mesmo assim?")) return;
       st.textContent = "Enviando…"; st.className = "save-state";
       if (btn) btn.disabled = true;
 
@@ -923,6 +935,12 @@
 
         const imageIds = s.photos.filter((p) => p.id != null).map((p) => p.id);
         const answer = ta.value;
+        if (failed && isEmptyAnswer(answer, imageIds)) {
+          // every photo failed and there is no text: sending would erase the saved answer
+          st.textContent = `✗ ${failed} foto(s) não foram enviadas — toque em Enviar para tentar de novo`;
+          st.className = "save-state err";
+          return;
+        }
         const { ok, status, data } = await api({
           action: "submit", quizId: QUIZ_ID,
           studentName: STUDENT, studentEmail: EMAIL, questionId: qid,
@@ -1037,12 +1055,13 @@
       const s = state[qid];
       if (!s || s.locked) return;
       s.locked = true;
-      if (s.dirty) {
+      const lqIds = s.photos.filter((p) => p.id != null).map((p) => p.id);
+      if (s.dirty && !isEmptyAnswer(s.el.value, lqIds)) {
         const answer = s.el.value;
         api({
           action: "submit", quizId: QUIZ_ID,
           studentName: STUDENT, studentEmail: EMAIL, questionId: qid, answer,
-          imageIds: s.photos.filter((p) => p.id != null).map((p) => p.id),
+          imageIds: lqIds,
         }).then(({ ok, data }) => {
           if (ok && data.ok) { markSent(qid, answer); s.st.textContent = "✓ Enviado (no fechamento)"; s.st.className = "save-state ok"; }
         }).catch(() => {});
@@ -1070,12 +1089,13 @@
       banner.textContent = text;
       // best-effort: flush any unsent answers once
       for (const qid in state) {
-        if (state[qid].dirty) {
-          const s = state[qid], answer = s.el.value;
+        const s = state[qid], ids = s.photos.filter((p) => p.id != null).map((p) => p.id);
+        if (s.dirty && !isEmptyAnswer(s.el.value, ids)) {
+          const answer = s.el.value;
           await api({
             action: "submit", quizId: QUIZ_ID,
             studentName: STUDENT, studentEmail: EMAIL, questionId: qid, answer,
-            imageIds: s.photos.filter((p) => p.id != null).map((p) => p.id),
+            imageIds: ids,
           }).then(({ ok, data }) => {
             if (ok && data.ok) { markSent(qid, answer); s.st.textContent = "✓ Enviado (no fechamento)"; s.st.className = "save-state ok"; }
           }).catch(() => {});
@@ -1101,11 +1121,12 @@
       for (const qid in state) {
         const s = state[qid];
         if (s.locked || !s.dirty) continue;
-        const answer = s.el.value;
+        const answer = s.el.value, ids = s.photos.filter((p) => p.id != null).map((p) => p.id);
+        if (isEmptyAnswer(answer, ids)) continue;
         api({
           action: "submit", quizId: QUIZ_ID,
           studentName: STUDENT, studentEmail: EMAIL, questionId: qid,
-          answer, imageIds: s.photos.filter((p) => p.id != null).map((p) => p.id),
+          answer, imageIds: ids,
         }, { keepalive: true, timeoutMs: 8000 }).then(({ ok, data }) => {
           if (ok && data.ok) markSent(qid, answer);
         }).catch(() => {});
