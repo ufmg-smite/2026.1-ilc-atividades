@@ -20,6 +20,8 @@
     header { background:#fff; border-bottom:1px solid #dadce0; padding:8px 14px;
              display:flex; gap:12px; align-items:center; flex-wrap:wrap; flex:0 0 auto; }
     header h1 { font-size:16px; font-weight:500; margin:0 10px 0 0; }
+    header .adminLink { font-size:13px; color:#1a73e8; text-decoration:none; margin-right:4px; white-space:nowrap; }
+    header .adminLink:hover { text-decoration:underline; }
     select, header input { padding:6px 8px; border:1px solid #dadce0; border-radius:6px; font:inherit; }
     button { border:0; border-radius:6px; padding:7px 13px; font-size:13px; cursor:pointer; color:#fff; background:#1a73e8; }
     button.ghost { background:#fff; color:#1a73e8; border:1px solid #1a73e8; }
@@ -172,6 +174,7 @@
 <body>
 
 <header>
+  <a href="./admin.html" class="adminLink" title="Voltar ao painel (admin)">← Painel</a>
   <h1>Correção</h1>
   <div id="loggedOut">
     <button onclick="signInGoogle()">Entrar com Google</button>
