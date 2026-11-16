@@ -94,6 +94,8 @@ def cmd_run(a):
     gab = {k: v for k, v in gab.items() if not k.startswith("_")}   # "_note" etc. are comments
     rows = []
     for qid in qids:
+        if "_" not in qid:      # not a Prova 1 "v<versão>_<tipo>" id: titles/numbers come from `feedback`
+            continue
         t = qid.split("_", 1)[1]
         rows.append(dict(run_id=a.run, question_id=qid, numero=order.get(qid, 0),
                          titulo=TYPE_TITLE.get(t, t), gabarito_html=gab.get(qid) or None))
