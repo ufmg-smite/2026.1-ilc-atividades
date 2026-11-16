@@ -236,7 +236,8 @@
     </div>
 
     <div class="sect" id="sectJustif">
-      <label>Justificativa <span class="hint">(e edita · Enter confirma · Shift+Enter quebra linha)</span></label>
+      <label>Justificativa <span class="hint">(e edita · Enter confirma · Shift+Enter quebra linha)</span>
+        <span class="hint" id="justifVis"></span></label>
       <textarea id="justif" rows="7"></textarea>
     </div>
 
@@ -297,7 +298,8 @@
   <div class="modal" style="max-width:620px" onclick="event.stopPropagation()">
     <h2>Relatório dos alunos — <span id="repRun"></span></h2>
     <p class="hint">Publicado, cada aluno vê na página "Minhas correções" a nota de cada questão,
-      os critérios marcados, a justificativa e a foto da sua resposta. Ocultar tira o relatório do ar
+      os critérios marcados e a sua resposta; numa prova, também o comentário do corretor (a justificativa);
+      numa atividade, a justificativa não aparece. Ocultar tira o relatório do ar
       na hora; nada é apagado.</p>
     <div id="repBody" style="font-size:13.5px;margin-top:10px">carregando…</div>
     <div id="repMsg" style="font-size:12.5px;margin-top:8px"></div>
@@ -673,6 +675,10 @@
   // ---------- loading ----------
   window.onRunChange = async function () {
     RUN = $("runSel").value;
+    const runInfo = (window.__runs || []).find((x) => x.id === RUN);
+    $("justifVis").innerHTML = runInfo && runInfo.source
+      ? "· <b>não aparece</b> para o aluno (atividade)"
+      : "· <b style=\"color:#b06000\">visível para o aluno</b> no relatório (prova)";
     const r = await api({ action: "getRubric", runId: RUN });
     if (!r.ok) { say(r.data.message || r.data.error || "Falha ao carregar.", "err"); return; }
     window.__rubric = r.data.questions || [];
@@ -1117,6 +1123,7 @@
     $("who").textContent = `${EMAIL} · ${ROLE === "teacher" ? "docente" : "monitor"}`;
     const rs = await api({ action: "listRuns" });
     const runs = (rs.data && rs.data.runs) || [];
+    window.__runs = runs;
     $("runSel").innerHTML = runs.map((x) =>
       `<option value="${escapeHtml(x.id)}">${escapeHtml(x.title)}</option>`).join("");
     if (runs.length) { $("runSel").value = runs[0].id; await onRunChange(); }

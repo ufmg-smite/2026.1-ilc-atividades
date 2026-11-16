@@ -8,7 +8,7 @@
 //    { action:"report", matricula, code }
 //      -> { ok, nome, exams:[ { runId, title, notaBase, points, maxPoints, grade,
 //             kind, medianGrade, questions:[ { numero, titulo, score|null, max, missing, median, delta,
-//                           grader, typed, enunciado,
+//                           grader, comentario, typed, enunciado,
 //                           criteria:[{label,detail,pts,met}], scans:[url],
 //                           gabaritoHtml } ] } ] }
 //
@@ -197,7 +197,7 @@ async function buildExam(run: any, studentKey: string) {
   if (!items.length) return null;
   const [evs, crit, rq, cq, cr, staff] = await Promise.all([
     rows(`correction_events?item_id=in.${inList(items.map((i) => i.id))}&kind=in.(accept,override,reopen)` +
-      `&select=item_id,kind,score,criteria,rubric,actor_email,created_at&order=created_at.asc`),
+      `&select=item_id,kind,score,criteria,rubric,justification,actor_email,created_at&order=created_at.asc`),
     rows(`correction_criteria?run_id=eq.${rid}&active=eq.true&select=question_id,key,label,detail,points,position`),
     rows(`report_questions?run_id=eq.${rid}&select=question_id,numero,titulo,gabarito_html,feedback`),
     rows(`correction_questions?run_id=eq.${rid}&select=question_id,prompt,position&order=position.asc`),
@@ -259,6 +259,9 @@ async function buildExam(run: any, studentKey: string) {
       score, max, missing, delta: (score === null || missing) ? 0 : Math.round((score - sumMet) * 100) / 100,
       median: stats ? (stats.byType[qtype(qid)] ?? null) : null,
       grader: d ? (staffName[String(d.actor_email).toLowerCase()] || "") : "",
+      // the grader's comment (the "Justificativa" box): shown on EXAMS only; on activities it
+      // is a note for staff (often the model's pre-correction note) and never leaves the server
+      comentario: (!isQuiz && d) ? String(d.justification || "").trim() : "",
       criteria, scans: ((it && it.image_paths) || []).map((p: string) => url[p]).filter(Boolean),
       typed: (it && it.typed_answer) || "",                // quizzes: the typed part of the answer
       enunciado: isQuiz ? (cqm.prompt || "") : "",          // quizzes: the statement (no scan carries it)
