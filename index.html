@@ -2010,7 +2010,7 @@
         });
         box.appendChild(tabs); box.appendChild(pane);
         const want = data.exams.findIndex((ex) => ex.runId === docId);
-        show(want >= 0 ? want : data.exams.length - 1);
+        show(want >= 0 ? want : 0);                // default: the first tab (the latest exam)
       }
       showView(true);
     }

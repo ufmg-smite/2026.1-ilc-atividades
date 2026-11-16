@@ -403,15 +403,17 @@ async function studentExams(mat: string, all: boolean, staffView = false): Promi
 }
 
 // ---------- staff view (admin page) ----------
-// Documents newest first, by the date of the exam/activity itself (correction_runs.created_at
+// Exams first, then activities; each newest first, by the date of the exam/activity itself (correction_runs.created_at
 // = the quiz's opening / the exam day), not by when its report was created.
 async function byDateDesc(runs: any[]): Promise<any[]> {
+  // exams first (Prova 2, Prova 1, ...), then the activities; each group newest first
   if (!runs.length) return runs;
-  const when: Record<string, string> = {};
-  for (const r of await rows(`correction_runs?id=in.${inList(runs.map((r) => r.run_id))}&select=id,created_at`)) {
-    when[r.id] = r.created_at || "";
+  const when: Record<string, string> = {}, quiz: Record<string, boolean> = {};
+  for (const r of await rows(`correction_runs?id=in.${inList(runs.map((r) => r.run_id))}&select=id,created_at,source`)) {
+    when[r.id] = r.created_at || ""; quiz[r.id] = !!r.source;
   }
-  return [...runs].sort((a, b) => String(when[b.run_id] || b.created_at || "").localeCompare(String(when[a.run_id] || a.created_at || "")));
+  return [...runs].sort((a, b) => (+!!quiz[a.run_id] - +!!quiz[b.run_id]) ||
+    String(when[b.run_id] || b.created_at || "").localeCompare(String(when[a.run_id] || a.created_at || "")));
 }
 
 async function staff(req: Request, p: Record<string, any>): Promise<Response> {
