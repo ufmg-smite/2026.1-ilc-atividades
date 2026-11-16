@@ -145,7 +145,15 @@ const median = (xs: number[]) => {
   return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
 };
 const qtype = (qid: string) => qid.replace(/^v\d+_/, "");   // shared across versions
-async function classStats(runId: string, base: number) {
+// The grade shown: points / nota_base * 100, capped at 100, rounded as the run says.
+// report_runs.grade_rounding (supabase/report_rounding.sql): "round" (default, nearest) or
+// "ceil" (up — matches the official grade sheet, e.g. Prova 2). Runs are read with select=*,
+// so a database without the column simply keeps "round".
+function toGrade(points: number, base: number, rounding?: string): number {
+  const x = (points / base) * 100;
+  return Math.min(100, rounding === "ceil" ? Math.ceil(x - 1e-9) : Math.round(x));
+}
+async function classStats(runId: string, base: number, rounding?: string) {
   const items = await rows(`correction_items?run_id=eq.${encodeURIComponent(runId)}&select=id,question_id,student_key&limit=5000`);
   const evs: any[] = [];
   for (let i = 0; i < items.length; i += 150) {   // keep the URL short
@@ -173,7 +181,7 @@ async function classStats(runId: string, base: number) {
     }
   }
   const gradeOf = (s: { pts: number; n: number; graded: number }) =>
-    s.graded === s.n && s.n > 0 ? Math.min(100, Math.round((s.pts / base) * 100)) : null;
+    s.graded === s.n && s.n > 0 ? toGrade(s.pts, base, rounding) : null;
   const grades = Object.values(byStudent).map(gradeOf).filter((g): g is number => g !== null);
   const gradeByKey: Record<string, number | null> = {};
   for (const [k, st] of Object.entries(byStudent)) gradeByKey[k] = gradeOf(st);
@@ -186,18 +194,22 @@ async function classStats(runId: string, base: number) {
 // Exams: the student's own booklet questions (their version). Activities (quizzes,
 // correction_runs.source = quiz id): ALL questions of the quiz, with the statement,
 // and the ones the student did not answer shown as 0 / "não respondida".
+// studentKey null = an activity the student did not send ("blank"): every question with its
+// statement, criteria, gabarito and exercises, no score and no grade (notSubmitted: true),
+// so every student can study every activity. Exams are never built blank.
 const headingTitle = (prompt: string) => {
   const m = String(prompt || "").match(/^\s*#+\s*(?:\d+\s*[.)]\s*)?(.+?)\s*$/m);
   return m ? m[1].replace(/[*_`$]/g, "").trim() : "";
 };
-async function buildExam(run: any, studentKey: string) {
+async function buildExam(run: any, studentKey: string | null) {
   const rid = encodeURIComponent(run.run_id);
-  const items = await rows(`correction_items?run_id=eq.${rid}` +
-    `&student_key=eq.${encodeURIComponent(studentKey)}&select=id,question_id,image_paths,typed_answer`);
-  if (!items.length) return null;
+  const blank = studentKey === null;
+  const items = blank ? [] : await rows(`correction_items?run_id=eq.${rid}` +
+    `&student_key=eq.${encodeURIComponent(studentKey!)}&select=id,question_id,image_paths,typed_answer`);
+  if (!items.length && !blank) return null;
   const [evs, crit, rq, cq, cr, staff] = await Promise.all([
-    rows(`correction_events?item_id=in.${inList(items.map((i) => i.id))}&kind=in.(accept,override,reopen)` +
-      `&select=item_id,kind,score,criteria,rubric,justification,actor_email,created_at&order=created_at.asc`),
+    items.length ? rows(`correction_events?item_id=in.${inList(items.map((i) => i.id))}&kind=in.(accept,override,reopen)` +
+      `&select=item_id,kind,score,criteria,rubric,justification,actor_email,created_at&order=created_at.asc`) : Promise.resolve([]),
     rows(`correction_criteria?run_id=eq.${rid}&active=eq.true&select=question_id,key,label,detail,points,position`),
     rows(`report_questions?run_id=eq.${rid}&select=question_id,numero,titulo,gabarito_html,feedback`),
     rows(`correction_questions?run_id=eq.${rid}&select=question_id,prompt,position&order=position.asc`),
@@ -205,6 +217,7 @@ async function buildExam(run: any, studentKey: string) {
     rows(`staff?select=email,name`),
   ]);
   const isQuiz = !!(cr[0] && cr[0].source);
+  if (blank && !isQuiz) return null;
   // current decision per item: latest accept/override not followed by a reopen
   const dec: Record<string, any> = {};
   for (const e of evs) {
@@ -230,7 +243,7 @@ async function buildExam(run: any, studentKey: string) {
     if (m[1].startsWith("relatorios/")) paths.add(m[1]);   // only report assets, never other objects
   }
   const base = Number(run.nota_base) || 0;
-  const [url, stats] = await Promise.all([signAll([...paths]), base > 0 ? classStats(run.run_id, base) : null]);
+  const [url, stats] = await Promise.all([signAll([...paths]), base > 0 ? classStats(run.run_id, base, run.grade_rounding) : null]);
 
   let points = 0, maxPoints = 0, allGraded = true;
   const questions = qids.map((qid) => {
@@ -249,7 +262,7 @@ async function buildExam(run: any, studentKey: string) {
     const max = criteria.reduce((s, c) => s + c.pts, 0);
     const sumMet = criteria.reduce((s, c) => s + (c.met ? c.pts : 0), 0);
     const missing = !it;                                   // activity question not answered
-    const score = missing ? 0 : (d ? Number(d.score) : null);
+    const score = missing ? (blank ? null : 0) : (d ? Number(d.score) : null);
     if (score === null) allGraded = false; else { points += score; maxPoints += max; }
     const gab = String(meta.gabarito_html || "").replace(assetRe, (_m, p) => url[p] || "");
     return {
@@ -266,6 +279,7 @@ async function buildExam(run: any, studentKey: string) {
       typed: (it && it.typed_answer) || "",                // quizzes: the typed part of the answer
       enunciado: isQuiz ? (cqm.prompt || "") : "",          // quizzes: the statement (no scan carries it)
       gabaritoHtml: gab,
+      bonus: !!(meta.feedback && meta.feedback.bonus),     // extra-credit question (feedback.bonus)
       feedback: meta.feedback || null,                     // skills + homework exercises (activities)
       // exercises for the skills NOT fully met in this question (all of them if unanswered)
       praticar: mergeEx(((meta.feedback && meta.feedback.skills) || [])
@@ -274,10 +288,11 @@ async function buildExam(run: any, studentKey: string) {
     };
   }).sort((a, b) => a.numero - b.numero);
 
-  const grade = allGraded && base > 0 ? Math.min(100, Math.round((points / base) * 100)) : null;
-  const summary = grade !== null && questions.some((q) => q.feedback) ? skillTable(questions, stats ? stats.critRate : {}) : null;
+  const grade = allGraded && base > 0 ? toGrade(points, base, run.grade_rounding) : null;
+  const summary = (grade !== null || blank) && questions.some((q) => q.feedback) ? skillTable(questions, stats ? stats.critRate : {}) : null;
   for (const q of questions) { delete (q as any).feedback; delete (q as any).qid; }
   return { runId: run.run_id, title: run.title, kind: isQuiz ? "atividade" : "prova", notaBase: base,
+           rounding: run.grade_rounding === "ceil" ? "ceil" : "round", notSubmitted: blank,
            points, maxPoints, grade, medianGrade: stats ? stats.medianGrade : null, questions, summary };
 }
 
@@ -301,17 +316,19 @@ function mergeEx(lists: Ex[]): Ex {
     const set = by.get(lista) || new Set<number>(); by.set(lista, set);
     for (const n of ns) set.add(n);
   }
-  return [...by.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  // homework lists first ("01".."09", "DN"), then activity questions ("@<runId>")
+  return [...by.entries()].sort((a, b) => (+a[0].startsWith("@") - +b[0].startsWith("@")) || a[0].localeCompare(b[0]))
     .map(([l, set]) => [l, [...set].sort((a, b) => a - b)] as [string, number[]]);
 }
 const C6_NAME = "Redação clara e justificativas";
 const C6_TIP = "Comece dizendo o que vai demonstrar, justifique cada passo e escreva fórmulas e frases com cuidado.";
 // presentation criteria: no skill of their own, they all go to the generic row above
 const CLARITY = new Set(["Justificativa clara", "Redação clara", "Notação correta", "Apresentação clara",
-  "Um passo por vez", "Lei em cada passo", "Definições claras", "Definições precisas", "Explicação clara"]);
+  "Um passo por vez", "Lei em cada passo", "Definições claras", "Definições precisas", "Explicação clara",
+  "Argumentação clara"]);
 function skillTable(questions: any[], critRate: Record<string, Record<string, [number, number]>>) {
   type Sk = { id: string; nome: string; earned: number; possible: number; ex: Ex[]; order: number;
-              cNum?: number; cDen?: number };
+              cNum?: number; cDen?: number; bonus?: boolean };
   const skills = new Map<string, Sk>();
   const c6: Sk = { id: "c6", nome: C6_NAME, earned: 0, possible: 0, ex: [], order: 1e6 };
   let order = 0;
@@ -324,6 +341,7 @@ function skillTable(questions: any[], critRate: Record<string, Record<string, [n
     for (const c of q.criteria) byKey[c.key] = c;
     for (const sk of fb.skills || []) {
       const cur: Sk = skills.get(sk.id) || { id: sk.id, nome: sk.nome, earned: 0, possible: 0, ex: [] as Ex[], order: order++ };
+      cur.bonus = (cur.bonus ?? true) && !!q.bonus;         // bonus skill = trained ONLY by bonus questions
       for (const k of sk.crit) {
         const c = byKey[k]; if (!c) continue;
         if (!q.missing) { cur.possible += c.pts; if (c.met) cur.earned += c.pts; }
@@ -343,11 +361,12 @@ function skillTable(questions: any[], critRate: Record<string, Record<string, [n
   const ratio = (s: Sk) => s.possible ? s.earned / s.possible : -1;
   const list = all.sort((a, b) => ratio(b) - ratio(a) || b.possible - a.possible || a.order - b.order).map((s) => ({
     nome: s.nome, earned: s.earned, possible: s.possible,          // possible 0 = not answered
+    ...(s.bonus ? { bonus: true } : {}),                           // not counted as "a melhorar"
     ex: s.id === "c6" ? [] : mergeEx(s.ex), dica: s.id === "c6" ? C6_TIP : undefined,
   }));
   const classRate = (s: Sk) => s.cDen ? s.cNum! / s.cDen : 0;
   const byRate = (a: Sk, b: Sk) => classRate(b) - classRate(a) || a.order - b.order;
-  const cand = all.filter((s) => s.id !== "c6");
+  const cand = all.filter((s) => s.id !== "c6" && !s.bonus);   // never start with a bonus skill
   const start = [
     ...cand.filter((s) => s.possible > 0 && s.earned < 0.9 * s.possible).sort(byRate),
     ...cand.filter((s) => s.possible === 0).sort(byRate),
@@ -360,6 +379,27 @@ function skillTable(questions: any[], critRate: Record<string, Record<string, [n
     return { nome: s.nome, ex: [[pick[0], [pick[1]]]] as Ex };
   });
   return { skills: list, alem: mergeEx(alem), start: startOut };
+}
+
+// ---------- the documents one student sees ----------
+// Their own corrected exams/activities (report_students), plus — blank — every activity
+// they did not send. Published runs only, unless `all` (staff view, test accounts).
+async function studentExams(mat: string, all: boolean, staffView = false): Promise<any[]> {
+  const [links, runs0] = await Promise.all([
+    rows(`report_students?matricula=eq.${encodeURIComponent(mat)}&select=run_id,student_key`),
+    rows(`report_runs?select=*&order=created_at.asc`),
+  ]);
+  const runs = await byDateDesc(runs0.filter((r) => all || r.published));
+  const quiz = new Set(runs.length ? (await rows(`correction_runs?id=in.${inList(runs.map((r) => r.run_id))}&select=id,source`))
+    .filter((r) => r.source).map((r) => r.id) : []);
+  const exams: any[] = [];
+  for (const run of runs) {
+    const link = links.find((l) => l.run_id === run.run_id);
+    if (!link && !quiz.has(run.run_id)) continue;
+    const ex = await buildExam(run, link ? link.student_key : null);
+    if (ex) exams.push(staffView ? { ...ex, published: !!run.published } : ex);
+  }
+  return exams;
 }
 
 // ---------- staff view (admin page) ----------
@@ -377,7 +417,7 @@ async function byDateDesc(runs: any[]): Promise<any[]> {
 async function staff(req: Request, p: Record<string, any>): Promise<Response> {
   const who = await authStaff(req);
   if (!who) return json({ error: "denied", message: "Acesso restrito à equipe (entre com a conta Google autorizada)." }, 403);
-  const runs = await byDateDesc(await rows(`report_runs?select=run_id,title,nota_base,published,created_at&order=created_at.asc`));
+  const runs = await byDateDesc(await rows(`report_runs?select=*&order=created_at.asc`));
 
   if (p.action === "staffList") {
     const [students, links] = await Promise.all([
@@ -387,7 +427,7 @@ async function staff(req: Request, p: Record<string, any>): Promise<Response> {
     const stats: Record<string, Record<string, number | null>> = {};
     for (const r of runs) {
       const base = Number(r.nota_base) || 0;
-      stats[r.run_id] = base > 0 ? (await classStats(r.run_id, base)).gradeByKey : {};
+      stats[r.run_id] = base > 0 ? (await classStats(r.run_id, base, r.grade_rounding)).gradeByKey : {};
     }
     const byMat: Record<string, Record<string, number | null>> = {};
     for (const l of links) (byMat[l.matricula] ||= {})[l.run_id] = stats[l.run_id]?.[l.student_key] ?? null;
@@ -410,8 +450,8 @@ async function staff(req: Request, p: Record<string, any>): Promise<Response> {
                                                body: JSON.stringify({ staff_email: who.email, matricula: mat }) });
     if (!r.ok) console.error("staff_report_views", r.status);
   } catch (e) { console.error("staff_report_views", e); }
-  const exams: any[] = [];
-  for (const run of runs) {
+  const exams = acc ? await studentExams(mat, true, true) : [];
+  if (!acc) for (const run of runs) {               // no access row: only the linked documents
     const link = links.find((l) => l.run_id === run.run_id);
     const ex = link ? await buildExam(run, link.student_key) : null;
     if (ex) exams.push({ ...ex, published: !!run.published });
@@ -455,18 +495,7 @@ Deno.serve(async (req) => {
     }
 
     // everything below is keyed on the VERIFIED matrícula only
-    const links = await rows(`report_students?matricula=eq.${encodeURIComponent(acc.matricula)}&select=run_id,student_key`);
-    const exams: any[] = [];
-    if (links.length) {
-      const runs = await byDateDesc(await rows(`report_runs?run_id=in.${inList(links.map((l) => l.run_id))}` +
-        `&select=run_id,title,nota_base,published,created_at&order=created_at.asc`));
-      for (const run of runs) {
-        if (!run.published && !acc.preview) continue;
-        const link = links.find((l) => l.run_id === run.run_id);
-        const ex = link ? await buildExam(run, link.student_key) : null;
-        if (ex) exams.push(ex);
-      }
-    }
+    const exams = await studentExams(acc.matricula, !!acc.preview);
     return json({ ok: true, nome: acc.nome, exams }, 200);
   } catch (e) {
     console.error(e);

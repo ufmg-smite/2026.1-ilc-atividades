@@ -26,6 +26,11 @@ Subcommands (run supabase/student_reports.sql first):
 
     /home/dap/miniconda3/bin/python3 setup_reports.py access
     /home/dap/miniconda3/bin/python3 setup_reports.py run --run dcc638-prova1 --title "Prova 1" --base 25
+
+  Prova 2 (after supabase/report_rounding.sql): grade = ceil(points / 12 * 100), capped at 100
+    ... run      --run dcc638-prova2 --title "Prova 2" --base 12 --rounding ceil
+    ... feedback --run dcc638-prova2      (titles, booklet numbers, skills -> homework)
+    ... link     --run dcc638-prova2      (from dados/exams/exam_2/mapeamento_prova2.csv)
 """
 import argparse, csv, hashlib, json, os, re, secrets
 from collections import Counter, defaultdict
@@ -75,9 +80,13 @@ def booklet_order(run):
 def cmd_run(a):
     existing = supa.get(f"report_runs?run_id=eq.{a.run}&select=run_id")
     if not existing:
-        supa.post("report_runs", [dict(run_id=a.run, title=a.title, nota_base=a.base, published=False)])
+        row = dict(run_id=a.run, title=a.title, nota_base=a.base, published=False)
+        if a.rounding: row["grade_rounding"] = a.rounding        # needs supabase/report_rounding.sql
+        supa.post("report_runs", [row])
     else:
-        supa.patch(f"report_runs?run_id=eq.{a.run}", dict(title=a.title, nota_base=a.base))
+        upd = dict(title=a.title, nota_base=a.base)
+        if a.rounding: upd["grade_rounding"] = a.rounding
+        supa.patch(f"report_runs?run_id=eq.{a.run}", upd)
     qids = [q["question_id"] for q in supa.get(f"correction_questions?run_id=eq.{a.run}&select=question_id")]
     order = booklet_order(a.run)
     gpath = os.path.join(DADOS, "relatorios", "gabaritos", f"{a.run}.json")
@@ -97,10 +106,27 @@ def cmd_run(a):
     print(f"report_runs: {a.run} ({'existing, published flag untouched' if existing else 'created, NOT published'})")
     print("report_questions:", sorted((r["question_id"], r["numero"], bool(r["gabarito_html"])) for r in rows))
 
+# human-verified booklet -> student mapping per exam (nome = roster name, matricula)
+LINK_MAP = {"dcc638-prova2": os.path.join(DADOS, "exams", "exam_2", "mapeamento_prova2.csv")}
+
+def slugify(s):
+    import unicodedata
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+
 def cmd_link(a):
-    by_name = {r["nome"]: MATRICULA_FIX.get(r["matricula"], r["matricula"])
-               for r in csv.DictReader(open(os.path.join(DADOS, "attendence_list", "notas_prova1.csv"), encoding="utf-8"))}
     items = supa.get(f"correction_items?run_id=eq.{a.run}&select=student_key,student_name&limit=5000")
+    if a.run in LINK_MAP:
+        # booklets were keyed by slug of the roster name (or of the name read on the cover)
+        mp, m = list(csv.DictReader(open(LINK_MAP[a.run], encoding="utf-8"))), {}
+        for col in ("nome", "nome_lido"):                       # roster names win over cover reads
+            for r in mp:
+                if r.get(col): m.setdefault(slugify(r[col]), MATRICULA_FIX.get(r["matricula"], r["matricula"]))
+        names = {it["student_name"]: it["student_key"] for it in items}
+        by_name = {nm: m[k] for nm, k in names.items() if k in m}
+    else:
+        by_name = {r["nome"]: MATRICULA_FIX.get(r["matricula"], r["matricula"])
+                   for r in csv.DictReader(open(os.path.join(DADOS, "attendence_list", "notas_prova1.csv"), encoding="utf-8"))}
     keys = {}
     for it in items:
         keys.setdefault(it["student_name"], set()).add(it["student_key"])
@@ -197,7 +223,10 @@ def cmd_feedback(a):
         f = {"skills": q["skills"]}
         if q.get("alem"):
             f["alem"] = q["alem"]
-        rows.append(dict(run_id=a.run, question_id=qid, numero=pos[qid] + 1, titulo=q["titulo"], feedback=f))
+        if q.get("bonus"):                      # extra-credit question (Prova 2: Q5)
+            f["bonus"] = True
+        # exams: "numero" in feedback.json = the number in the booklet (versions share it)
+        rows.append(dict(run_id=a.run, question_id=qid, numero=q.get("numero", pos[qid] + 1), titulo=q["titulo"], feedback=f))
     # gabaritos (Markdown + LaTeX) when dados/relatorios/gabaritos/<run>.json exists
     gpath = os.path.join(DADOS, "relatorios", "gabaritos", f"{a.run}.json")
     gab = json.load(open(gpath, encoding="utf-8")) if os.path.exists(gpath) else {}
@@ -225,6 +254,8 @@ if __name__ == "__main__":
         if name == "run":
             s.add_argument("--title", default="Prova 1")
             s.add_argument("--base", type=float, default=25)
+            s.add_argument("--rounding", choices=["round", "ceil"], default=None,
+                           help="report_runs.grade_rounding (Prova 2: ceil, to match the official sheet)")
         if name == "publish":
             s.add_argument("--off", action="store_true")
         if name == "acessos":
