@@ -363,10 +363,21 @@ function skillTable(questions: any[], critRate: Record<string, Record<string, [n
 }
 
 // ---------- staff view (admin page) ----------
+// Documents newest first, by the date of the exam/activity itself (correction_runs.created_at
+// = the quiz's opening / the exam day), not by when its report was created.
+async function byDateDesc(runs: any[]): Promise<any[]> {
+  if (!runs.length) return runs;
+  const when: Record<string, string> = {};
+  for (const r of await rows(`correction_runs?id=in.${inList(runs.map((r) => r.run_id))}&select=id,created_at`)) {
+    when[r.id] = r.created_at || "";
+  }
+  return [...runs].sort((a, b) => String(when[b.run_id] || b.created_at || "").localeCompare(String(when[a.run_id] || a.created_at || "")));
+}
+
 async function staff(req: Request, p: Record<string, any>): Promise<Response> {
   const who = await authStaff(req);
   if (!who) return json({ error: "denied", message: "Acesso restrito à equipe (entre com a conta Google autorizada)." }, 403);
-  const runs = await rows(`report_runs?select=run_id,title,nota_base,published,created_at&order=created_at.asc`);
+  const runs = await byDateDesc(await rows(`report_runs?select=run_id,title,nota_base,published,created_at&order=created_at.asc`));
 
   if (p.action === "staffList") {
     const [students, links] = await Promise.all([
@@ -447,8 +458,8 @@ Deno.serve(async (req) => {
     const links = await rows(`report_students?matricula=eq.${encodeURIComponent(acc.matricula)}&select=run_id,student_key`);
     const exams: any[] = [];
     if (links.length) {
-      const runs = await rows(`report_runs?run_id=in.${inList(links.map((l) => l.run_id))}` +
-        `&select=run_id,title,nota_base,published,created_at&order=created_at.asc`);
+      const runs = await byDateDesc(await rows(`report_runs?run_id=in.${inList(links.map((l) => l.run_id))}` +
+        `&select=run_id,title,nota_base,published,created_at&order=created_at.asc`));
       for (const run of runs) {
         if (!run.published && !acc.preview) continue;
         const link = links.find((l) => l.run_id === run.run_id);
