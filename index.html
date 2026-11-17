@@ -224,9 +224,11 @@
     .rp-aten > b { color:#8a5a1c; margin-right:4px; }
     .rp-gab .lei { color:#6b6b6b; font-size:12.5px; } .rp-gab img { max-width:100%; }
     .rp-gab .tree { text-align:center; } .rp-gab .tree img { width:100%; max-width:680px; }
-    @media print {
-      @page { size: A4; margin: 10mm 11mm; }
+    @media print { @page { size: A4; margin: 10mm 11mm; } }
+    /* Print layout. Applied (also on screen) while body.rp-printing is set, so the page can
+       measure each question at A4 width and shrink its scans until it fits one page. */
       body.rp-printing { background:#fff; padding:0; font-size:10pt; }
+      body.rp-printing #rpView { width:188mm; max-width:188mm; margin:0; }
       body.rp-printing .rp-noprint, body.rp-printing #banner { display:none !important; }
       body.rp-printing .card { border:0; padding:0; margin:0 0 4mm; max-width:none; }
       body.rp-printing .rp-qcard { break-before:page; }
@@ -250,7 +252,6 @@
       body.rp-printing .rp-gab .tree img { max-width:150mm; }
       body.rp-printing .rp-aten { margin-top:1.5mm; padding:1.5mm 3mm; font-size:8.8pt; line-height:1.35; }
       body.rp-printing .rp-gab, body.rp-printing .rp-adj, body.rp-printing .rp-enc, body.rp-printing .rp-aten { break-inside:avoid; }
-    }
 </style>
 </head>
 <body>
@@ -2297,10 +2298,37 @@
     $("rpGo").addEventListener("click", login);
     $("rpCode").addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
     $("rpBack").addEventListener("click", () => showView(false));
-    $("rpPrint").addEventListener("click", () => {
+    // Print: one A4 page per question. With the print layout applied, measure each question
+    // and shrink its scans (never below 50 mm) until the whole question fits the page.
+    async function preparePrint() {
       document.body.classList.add("rp-printing");
+      const imgs = [...document.querySelectorAll("#rpExams .rp-scans img")];
+      for (const im of imgs) { im.loading = "eager"; im.style.maxHeight = ""; }
+      await Promise.all(imgs.map((im) => (im.complete ? Promise.resolve() : im.decode().catch(() => {}))));
+      const probe = document.createElement("div"); probe.style.height = "100mm"; document.body.appendChild(probe);
+      const mm = probe.getBoundingClientRect().height / 100; probe.remove();
+      const pageH = 274 * mm, minH = 50 * mm;                      // 297 − 2×10 mm margins, 3 mm slack
+      for (const card of document.querySelectorAll("#rpExams .rp-qcard")) {
+        const own = [...card.querySelectorAll(".rp-scans img")];
+        for (let pass = 0; pass < 3 && own.length; pass++) {
+          const excess = card.getBoundingClientRect().height - pageH;
+          if (excess <= 0) break;
+          const rowH = Math.max(...own.map((im) => im.getBoundingClientRect().height));
+          const h = Math.max(minH, rowH - excess);
+          for (const im of own) im.style.maxHeight = h + "px";
+          if (h === minH) break;
+        }
+      }
+    }
+    function endPrint() {
+      document.body.classList.remove("rp-printing");
+      for (const im of document.querySelectorAll("#rpExams .rp-scans img")) im.style.maxHeight = "";
+    }
+    window.__rpPreparePrint = preparePrint;                        // used by the local preview script
+    $("rpPrint").addEventListener("click", async () => {
+      await preparePrint();
+      window.addEventListener("afterprint", endPrint, { once: true });
       window.print();
-      setTimeout(() => document.body.classList.remove("rp-printing"), 500);
     });
     $("rpLogout").addEventListener("click", () => {
       store.clear();
