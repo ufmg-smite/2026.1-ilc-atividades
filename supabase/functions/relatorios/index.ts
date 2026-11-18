@@ -225,7 +225,8 @@ async function buildExam(run: any, studentKey: string | null) {
     else dec[e.item_id] = e;
   }
   const staffName: Record<string, string> = {};
-  for (const s of staff) staffName[String(s.email).toLowerCase()] = s.name || "";
+  // first name only: students see "Corrigida por Pedro", never the staff member's full name
+  for (const s of staff) staffName[String(s.email).toLowerCase()] = String(s.name || "").trim().split(/\s+/)[0] || "";
   const qmeta: Record<string, any> = {};
   for (const q of rq) qmeta[q.question_id] = q;
   const cqmeta: Record<string, any> = {};
