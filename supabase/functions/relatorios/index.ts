@@ -403,6 +403,60 @@ async function studentExams(mat: string, all: boolean, staffView = false): Promi
   return exams;
 }
 
+// ---------- lazy loading: the list of documents (light) + one document in full ----------
+// The page used to receive every document fully built (signed scans, class statistics, ...),
+// which made opening the report slow. Now it gets the list (title, grade) and the selected
+// document; the others are built when their tab is opened ("doc" / "staffDoc").
+async function studentDocList(mat: string, all: boolean, staffView = false) {
+  const [links, runs0] = await Promise.all([
+    rows(`report_students?matricula=eq.${encodeURIComponent(mat)}&select=run_id,student_key`),
+    rows(`report_runs?select=*&order=created_at.asc`),
+  ]);
+  const runs = await byDateDesc(runs0.filter((r) => all || r.published));
+  if (!runs.length) return { runs, docs: [] as any[], keyOf: {} as Record<string, string | null> };
+  const quiz = new Set((await rows(`correction_runs?id=in.${inList(runs.map((r) => r.run_id))}&select=id,source`))
+    .filter((r) => r.source).map((r) => r.id));
+  const keyOf: Record<string, string | null> = {};
+  for (const run of runs) {
+    const link = links.find((l) => l.run_id === run.run_id);
+    if (link) keyOf[run.run_id] = link.student_key; else if (quiz.has(run.run_id)) keyOf[run.run_id] = null;
+  }
+  const shown = runs.filter((r) => r.run_id in keyOf);
+  // the student's own grade per document (same rule as buildExam: every answer graded)
+  const pairs = shown.filter((r) => keyOf[r.run_id] !== null);
+  const items = pairs.length ? await allRows(`correction_items?select=id,run_id,student_key` +
+    `&run_id=in.${inList(pairs.map((r) => r.run_id))}&student_key=in.${inList([...new Set(pairs.map((r) => keyOf[r.run_id]!))])}`) : [];
+  const mine = items.filter((it) => keyOf[it.run_id] === it.student_key);
+  const evs = mine.length ? await allRows(`correction_events?item_id=in.${inList(mine.map((i) => i.id))}` +
+    `&kind=in.(accept,override,reopen)&select=item_id,kind,score&order=created_at.asc`) : [];
+  const dec: Record<string, any> = {};
+  for (const e of evs) { if (e.kind === "reopen") delete dec[e.item_id]; else dec[e.item_id] = e; }
+  const docs = shown.map((run) => {
+    const key = keyOf[run.run_id];
+    const doc: any = { runId: run.run_id, title: run.title, kind: quiz.has(run.run_id) ? "atividade" : "prova",
+                       notSubmitted: key === null, grade: null };
+    if (key !== null) {
+      const its = mine.filter((i) => i.run_id === run.run_id);
+      const base = Number(run.nota_base) || 0;
+      if (its.length && base > 0 && its.every((i) => dec[i.id])) {
+        doc.grade = toGrade(its.reduce((s, i) => s + Number(dec[i.id].score), 0), base, run.grade_rounding);
+      }
+    }
+    if (staffView) doc.published = !!run.published;
+    return doc;
+  });
+  return { runs, docs, keyOf };
+}
+
+async function oneDoc(L: { runs: any[]; keyOf: Record<string, string | null> }, runId: string | undefined,
+                      staffView = false) {
+  const run = L.runs.find((r) => r.run_id === runId && r.run_id in L.keyOf) ||
+              L.runs.find((r) => r.run_id in L.keyOf);
+  if (!run) return null;
+  const ex = await buildExam(run, L.keyOf[run.run_id]);
+  return ex ? (staffView ? { ...ex, published: !!run.published } : ex) : null;
+}
+
 // ---------- staff view (admin page) ----------
 // Exams first, then activities; each newest first, by the date of the exam/activity itself (correction_runs.created_at
 // = the quiz's opening / the exam day), not by when its report was created.
@@ -442,6 +496,16 @@ async function staff(req: Request, p: Record<string, any>): Promise<Response> {
     }, 200);
   }
 
+  // staffDoc: one document of one student (lazy tabs)
+  if (p.action === "staffDoc") {
+    const m = normMatricula(p.matricula);
+    if (!m) return json({ error: "missing", message: "Informe a matrícula." }, 400);
+    const L = await studentDocList(m, true, true);
+    const ex = await oneDoc(L, String(p.runId || ""), true);
+    if (!ex || ex.runId !== p.runId) return json({ error: "not_found", message: "Documento não encontrado." }, 404);
+    return json({ ok: true, exam: ex }, 200);
+  }
+
   // staffReport: one student's documents, published or not
   const mat = normMatricula(p.matricula);
   if (!mat) return json({ error: "missing", message: "Informe a matrícula." }, 400);
@@ -453,6 +517,10 @@ async function staff(req: Request, p: Record<string, any>): Promise<Response> {
                                                body: JSON.stringify({ staff_email: who.email, matricula: mat }) });
     if (!r.ok) console.error("staff_report_views", r.status);
   } catch (e) { console.error("staff_report_views", e); }
+  if (p.lazy && acc) {                              // list + the requested (or first) document
+    const L = await studentDocList(mat, true, true);
+    return json({ ok: true, nome: acc.nome, matricula: mat, docs: L.docs, exam: await oneDoc(L, p.runId, true) }, 200);
+  }
   const exams = acc ? await studentExams(mat, true, true) : [];
   if (!acc) for (const run of runs) {               // no access row: only the linked documents
     const link = links.find((l) => l.run_id === run.run_id);
@@ -467,10 +535,10 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   let p: Record<string, any>;
   try { p = await req.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
-  if (!p || !["report", "staffList", "staffReport"].includes(p.action)) return json({ error: "Unknown action" }, 400);
+  if (!p || !["report", "doc", "staffList", "staffReport", "staffDoc"].includes(p.action)) return json({ error: "Unknown action" }, 400);
 
   try {
-    if (p.action === "staffList" || p.action === "staffReport") return await staff(req, p);
+    if (p.action === "staffList" || p.action === "staffReport" || p.action === "staffDoc") return await staff(req, p);
     const mat = normMatricula(p.matricula), code = normCode(p.code);
     if (!mat || !code) return json({ error: "missing", message: "Informe a matrícula e o código." }, 400);
     const ip = clientIp(req);
@@ -486,6 +554,14 @@ Deno.serve(async (req) => {
       return json({ error: "denied", message: "Matrícula ou código incorretos." }, 403);
     }
 
+    // "doc": one more document for an already verified student (lazy tabs); not logged again
+    if (p.action === "doc") {
+      const L = await studentDocList(acc.matricula, !!acc.preview);
+      const ex = await oneDoc(L, String(p.runId || ""));
+      if (!ex || ex.runId !== p.runId) return json({ error: "not_found", message: "Documento não encontrado." }, 404);
+      return json({ ok: true, exam: ex }, 200);
+    }
+
     // access log (supabase/report_access.sql): matrícula + time only; test accounts
     // are not counted, and a failed write never blocks the student's correction
     // (awaited: the runtime may stop the worker once the response is sent)
@@ -498,7 +574,11 @@ Deno.serve(async (req) => {
     }
 
     // everything below is keyed on the VERIFIED matrícula only
-    const exams = await studentExams(acc.matricula, !!acc.preview);
+    if (p.lazy) {                                     // list + the requested (or first) document
+      const L = await studentDocList(acc.matricula, !!acc.preview);
+      return json({ ok: true, nome: acc.nome, docs: L.docs, exam: await oneDoc(L, p.runId) }, 200);
+    }
+    const exams = await studentExams(acc.matricula, !!acc.preview);   // older pages: everything at once
     return json({ ok: true, nome: acc.nome, exams }, 200);
   } catch (e) {
     console.error(e);
