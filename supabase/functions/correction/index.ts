@@ -23,6 +23,7 @@
 //    { action:"reportStatus",   runId }        student report: state, links, progress
 //    { action:"publishReport",  runId, published, title?, notaBase? }
 //    { action:"linkStudent",    email, matricula }   quiz e-mail -> matrícula (reports)
+//    { action:"history",        itemId }             every grade change of one answer (read-only)
 //
 //  THE ONE RULE THAT SHAPES EVERYTHING: the grading model never emits a score.
 //  It reports which barème criteria an answer satisfies; points live in the
@@ -802,6 +803,34 @@ Deno.serve(async (req) => {
 
   // A quiz e-mail the roster does not know (personal Gmail, typo...): staff give the
   // matrícula once; it is checked against student_access and reused by every report.
+  // Every grade change of one answer, oldest first (accept / override / reopen),
+  // with the grader's first name and the criteria met — read-only, any staff.
+  if (action === "history") {
+    const itemId = Number(p.itemId);
+    if (!Number.isInteger(itemId) || itemId <= 0) return json({ error: "itemId inválido" }, 400);
+    const it = (await rows(`correction_items?id=eq.${itemId}&select=run_id,question_id`))[0];
+    if (!it) return json({ error: "Resposta não encontrada" }, 404);
+    const [evs, crit, staff] = await Promise.all([
+      rows(`correction_events?item_id=eq.${itemId}&kind=in.(accept,override,reopen)` +
+           `&select=kind,score,criteria,justification,actor_email,created_at&order=created_at.asc&limit=500`),
+      rows(`correction_criteria?run_id=eq.${enc(it.run_id)}&question_id=eq.${enc(it.question_id)}` +
+           `&select=key,label,position&order=position.asc`),
+      rows(`staff?select=email,name`),
+    ]);
+    const first: Record<string, string> = {};
+    for (const s of staff) first[String(s.email).toLowerCase()] = String(s.name || s.email).trim().split(/\s+/)[0];
+    return json({
+      ok: true,
+      criteria: crit.map((c: any) => ({ key: c.key, label: c.label ?? c.key })),
+      events: evs.map((e: any) => ({
+        kind: e.kind, at: e.created_at, by: first[String(e.actor_email).toLowerCase()] || e.actor_email,
+        score: e.kind === "reopen" ? null : Number(e.score),
+        met: e.kind === "reopen" ? [] : Object.keys(e.criteria || {}).filter((k) => e.criteria[k]?.met === true),
+        justification: e.justification || "",
+      })),
+    }, 200);
+  }
+
   if (action === "linkStudent") {
     const email = String(p.email || "").toLowerCase().trim();
     const mat = String(p.matricula || "").replace(/\D/g, "");

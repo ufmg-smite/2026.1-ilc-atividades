@@ -187,6 +187,8 @@
       <option value="random" selected>ordem aleatória</option>
       <option value="alpha">ordem alfabética</option>
     </select>
+    <input id="searchBox" class="deskOnly" type="search" placeholder="buscar aluno…" autocomplete="off"
+           title="filtra a lista; Enter abre o primeiro" style="width:150px;padding:4px 8px;font-size:13px">
     <span class="prog" id="prog"></span>
     <span class="spacer"></span>
     <button class="ghost" onclick="openRubric()" title="b">Barema</button>
@@ -225,6 +227,8 @@
         <span class="scoremax" id="scoreMax"></span>
         <span class="spacer"></span>
         <span class="badge" id="stateBadge">pendente</span>
+        <button class="ghost" onclick="openHistory()" title="histórico de notas (h)"
+                style="padding:3px 8px;font-size:12px">Histórico</button>
         <button class="ghost" onclick="reopenItem()" title="remover a nota / reabrir (x)"
                 style="padding:3px 8px;font-size:12px">✕ nota</button>
       </div>
@@ -296,6 +300,16 @@
   </div>
 </div>
 
+<!-- ===== grade history of one answer ===== -->
+<div class="overlay hidden" id="histOv" onclick="closeHistory()">
+  <div class="modal" style="max-width:620px" onclick="event.stopPropagation()">
+    <h2>Histórico de notas — <span id="histWho"></span></h2>
+    <p class="hint">Todas as notas dadas a esta resposta, da mais antiga à mais recente. A última vale.</p>
+    <div id="histBody" style="font-size:13.5px;margin-top:10px">carregando…</div>
+    <div style="text-align:right;margin-top:12px"><button class="ghost" onclick="closeHistory()">Fechar</button></div>
+  </div>
+</div>
+
 <!-- ===== student report: publish / hide ===== -->
 <div class="overlay hidden" id="reportOv" onclick="closeReport()">
   <div class="modal" style="max-width:620px" onclick="event.stopPropagation()">
@@ -331,6 +345,7 @@
       <kbd>Ctrl</kbd>+<kbd>← ↑ ↓ →</kbd><span>mover a imagem pelo teclado</span>
       <kbd>v</kbd><span>alternar imagem ↔ transcrição</span>
       <kbd>x</kbd><span>remover a nota (reabrir; histórico mantido)</span>
+      <kbd>h</kbd><span>histórico de notas desta resposta (datas e corretores)</span>
       <kbd>s</kbd><span>mostrar/ocultar a lista de alunos</span>
       <kbd>Esc</kbd><span>sair do campo de texto / fechar</span>
       <kbd>?</kbd><span>esta ajuda</span>
@@ -454,7 +469,9 @@
   function renderSidebar() {
     const done = ITEMS.filter((i) => i.decision).length;
     $("prog").innerHTML = `<b>${done}</b> / ${ITEMS.length} corrigidas`;
+    const q = normName($("searchBox").value);
     $("sidebar").innerHTML = ITEMS.map((it, i) => {
+      if (q && !normName(it.studentName || it.studentKey).includes(q)) return "";
       const s = it.decision ? fmtScore(it.decision.score)
                             : (it.proposal ? fmtScore(it.proposal.score) : "—");
       const gr = it.decision ? `<span class="gr" title="${escapeHtml(graderName(it.decision.by))}">` +
@@ -691,6 +708,7 @@
   };
 
   window.loadQueue = async function () {
+    const keepKey = cur() ? cur().studentKey : null;   // stay on the same student across questions
     QID = $("qSel").value;
     say("carregando…");
     const r = await api({ action: "queue", runId: RUN, questionId: QID, order: $("orderSel").value });
@@ -713,7 +731,8 @@
           b.studentName || b.studentEmail || "", "pt-BR", { sensitivity: "base" }));
     }
     signedAt = Date.now();
-    IDX = ITEMS.findIndex((i) => !i.decision);
+    IDX = keepKey ? ITEMS.findIndex((i) => i.studentKey === keepKey) : -1;
+    if (IDX < 0) IDX = ITEMS.findIndex((i) => !i.decision);
     if (IDX < 0) IDX = 0;
     loadItemState();
     say(ITEMS.length ? "" : "Nenhuma resposta importada para esta questão.");
@@ -1065,6 +1084,19 @@
       if (e.key === "Escape") closeReport();
       return;                                    // report dialog owns the keyboard
     }
+    if (!$("histOv").classList.contains("hidden")) {
+      if (e.key === "Escape" || e.key.toLowerCase() === "h") closeHistory();
+      return;
+    }
+    if (e.target && e.target.id === "searchBox") {  // the search box never commits a grade
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const q = normName($("searchBox").value);
+        const i = ITEMS.findIndex((it) => normName(it.studentName || it.studentKey).includes(q));
+        if (q && i >= 0) { jump(i); e.target.blur(); }
+      } else if (e.key === "Escape") { e.target.value = ""; renderSidebar(); e.target.blur(); }
+      return;
+    }
 
     if (inField(e)) {
       if (e.key === "Escape") { e.target.blur(); e.preventDefault(); return; }
@@ -1097,6 +1129,7 @@
       case "0":          e.preventDefault(); resetView(); break;
       case "v":          e.preventDefault(); toggleScanView(); break;
       case "x":          e.preventDefault(); reopenItem(); break;
+      case "h":          e.preventDefault(); openHistory(); break;
       case "s":          e.preventDefault(); $("sidebar").classList.toggle("hidden"); break;
       case "?":          e.preventDefault(); openHelp(); break;
       default:
@@ -1110,6 +1143,46 @@
   $("critTable").addEventListener("change", (e) => {
     if (e.target.dataset && e.target.dataset.key) toggleCrit(e.target.dataset.key);
   });
+  $("searchBox").addEventListener("input", () => renderSidebar());
+
+  // ---------- grade history ----------
+  function normName(t) {
+    return String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  }
+  window.openHistory = async function () {
+    const it = cur();
+    if (!it) return;
+    $("histWho").textContent = it.studentName || it.studentKey;
+    $("histBody").textContent = "carregando…";
+    $("histOv").classList.remove("hidden");
+    const r = await api({ action: "history", itemId: it.id });
+    if (!r.ok) { $("histBody").innerHTML = `<span class="err">${escapeHtml(r.data.message || r.data.error || "Falha.")}</span>`; return; }
+    const lab = {};
+    for (const c of r.data.criteria || []) lab[c.key] = c.label;
+    const evs = r.data.events || [];
+    if (!evs.length) { $("histBody").innerHTML = `<p>Ainda sem nota (só a proposta do modelo).</p>`; return; }
+    let prev = null;
+    $("histBody").innerHTML = `<table style="width:100%;border-collapse:collapse">` + evs.map((e) => {
+      const when = new Date(e.at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+      const what = e.kind === "reopen" ? "nota removida (reaberta)"
+                 : `<b>${fmtScore(e.score)}</b>${prev && prev.score !== null ? ` (antes ${fmtScore(prev.score)})` : ""}`;
+      let diff = "";
+      if (e.kind !== "reopen") {
+        const before = new Set(prev ? prev.met : []), now = new Set(e.met);
+        const add = e.met.filter((k) => !before.has(k)), rem = [...before].filter((k) => !now.has(k));
+        if (prev && prev.kind !== "reopen") diff = [...add.map((k) => "+ " + (lab[k] || k)), ...rem.map((k) => "− " + (lab[k] || k))].join(" · ");
+      }
+      const just = e.justification && (!prev || e.justification !== prev.justification) ? e.justification : "";
+      prev = e;
+      return `<tr style="border-top:1px solid #eee;vertical-align:top">
+        <td style="padding:5px 8px 5px 0;white-space:nowrap">${escapeHtml(when)}</td>
+        <td style="padding:5px 8px;white-space:nowrap">${escapeHtml(e.by)}</td>
+        <td style="padding:5px 0">${what}${diff ? `<div class="hint">${escapeHtml(diff)}</div>` : ""}
+          ${just ? `<div class="hint" style="font-style:italic">“${escapeHtml(just)}”</div>` : ""}</td></tr>`;
+    }).join("") + `</table>`;
+  };
+  window.closeHistory = function () { $("histOv").classList.add("hidden"); };
+
   $("sidebar").addEventListener("click", (e) => {
     const row = e.target.closest(".srow");
     if (row) { jump(parseInt(row.dataset.i, 10)); $("sidebar").classList.remove("open"); }
